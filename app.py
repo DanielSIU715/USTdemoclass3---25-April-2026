@@ -6,7 +6,7 @@ from transformers import pipeline
 import time
 
 # -----------------------------
-# Load models once (important!)
+# Load models once
 # -----------------------------
 @st.cache_resource
 def load_caption_model():
@@ -14,7 +14,7 @@ def load_caption_model():
 
 @st.cache_resource
 def load_tts_model():
-    return pipeline("text-to-speech", model="facebook/fastspeech2-en-ljspeech")
+    return pipeline("text-to-speech", model="espnet/kan-bayashi-ljspeech_vits")
 
 caption_model = load_caption_model()
 tts_model = load_tts_model()
@@ -32,14 +32,13 @@ if uploaded_image is not None:
         image = Image.open(uploaded_image)
         st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    # Generate caption
-    if st.button("Generate Caption"):
+    if st.button("Generate Caption & Audio"):
         with st.spinner("Generating caption..."):
             caption = caption_model(image)[0]["generated_text"]
+
         st.success("Caption generated!")
         st.write(f"**Caption:** {caption}")
 
-        # Generate audio from caption
         with st.spinner("Generating audio..."):
             audio_output = tts_model(caption)
 
@@ -47,3 +46,4 @@ if uploaded_image is not None:
         sample_rate = audio_output["sampling_rate"]
 
         st.audio(audio_array, sample_rate=sample_rate)
+
