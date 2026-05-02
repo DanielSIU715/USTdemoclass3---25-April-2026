@@ -1,49 +1,49 @@
 # Program title: Storytelling App
 
+# Import part
 import streamlit as st
-from PIL import Image
 from transformers import pipeline
-import time
 
-# -----------------------------
-# Load models once
-# -----------------------------
-@st.cache_resource
-def load_caption_model():
-    return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+# Function part
+def img2text(url):
+    image_to_text_model = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+    text = image_to_text_model(url)[0]["generated_text"]
+    return text
 
-@st.cache_resource
-def load_tts_model():
-    return pipeline("text-to-speech", model="espnet/kan-bayashi-ljspeech_vits")
+# Main part
+st.set_page_config(page_title="Your Image to Audio Story", page_icon="🦜")
+st.header("Turn Your Image to Audio Story")
+uploaded_file = st.file_uploader("Select an Image...")
 
-caption_model = load_caption_model()
-tts_model = load_tts_model()
+if uploaded_file is not None:
+    # Save file locally
+    bytes_data = uploaded_file.getvalue()
+    with open(uploaded_file.name, "wb") as file:
+        file.write(bytes_data)
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
-st.title("Image → Caption → Audio Storytelling App")
+    st.image(uploaded_file, caption="Uploaded Image", use_column_width=True)
 
-uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+    # Stage 1: Image to Text (Using the function)
+    st.text('Processing img2text...')
+    scenario = img2text(uploaded_file.name)
+    st.write(f"**Scenario:** {scenario}")
 
-if uploaded_image is not None:
-    with st.spinner("Loading image..."):
-        time.sleep(1)
-        image = Image.open(uploaded_image)
-        st.image(image, caption="Uploaded Image", use_column_width=True)
+    # Stage 2: Text to Story (Inline)
+    st.text('Generating a story...')
+    story_pipe = pipeline("text-generation", model="pranavpsv/genre-story-generator-v2")
+    story_results = story_pipe(scenario)
+    story = story_results[0]['generated_text']
+    st.write(f"**Story:** {story}")
 
-    if st.button("Generate Caption & Audio"):
-        with st.spinner("Generating caption..."):
-            caption = caption_model(image)[0]["generated_text"]
+    # Stage 3: Story to Audio (Inline)
+    st.text('Generating audio data...')
+    audio_pipe = pipeline("text-to-audio", model="Matthijs/mms-tts-eng")
+    audio_data = audio_pipe(story)
 
-        st.success("Caption generated!")
-        st.write(f"**Caption:** {caption}")
-
-        with st.spinner("Generating audio..."):
-            audio_output = tts_model(caption)
-
-        audio_array = audio_output["audio"]
-        sample_rate = audio_output["sampling_rate"]
-
+    # Play button
+    if st.button("Play Audio"):
+        audio_array = audio_data["audio"]
+        sample_rate = audio_data["sampling_rate"]
+        st.audio(audio_array, sample_rate=sample_rate)
         st.audio(audio_array, sample_rate=sample_rate)
 
