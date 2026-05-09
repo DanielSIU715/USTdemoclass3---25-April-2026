@@ -4,6 +4,9 @@ from PIL import Image
 import numpy as np
 import tempfile
 import wave
+import requests
+import io
+from pydub import AudioSegment
 
 # =========================
 # FUNCTION PART
@@ -56,7 +59,7 @@ def text2story(caption):
     return cleaned
 
 
-# ---- 3A. Story → Voice (cheerful Hugging Face TTS) ----
+# ---- 3A. Story → Voice (Hugging Face TTS) ----
 @st.cache_resource
 def get_tts_model():
     return pipeline("text-to-speech", model="facebook/mms-tts-eng")
@@ -67,35 +70,37 @@ def generate_voice_audio(text):
     return out["audio"], out["sampling_rate"]
 
 
-# ---- 3B. Generate cheerful background music (MusicGen) ----
-@st.cache_resource
-def get_music_model():
-    return pipeline("text-to-audio", model="facebook/musicgen-small")
+# ---- 3B. Load cheerful background music (MP3 from GitHub RAW URL) ----
+def load_music_from_github():
+    url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.mp3"
 
-def generate_music():
-    music_model = get_music_model()
-    music = music_model("happy cheerful kids music", max_new_tokens=256)
-    return music["audio"], music["sampling_rate"]
+    response = requests.get(url)
+    audio_bytes = io.BytesIO(response.content)
+
+    music_seg = AudioSegment.from_file(audio_bytes, format="mp3")
+
+    samples = np.array(music_seg.get_array_of_samples()).astype(np.float32)
+    samples = samples / 32767.0
+
+    sr = music_seg.frame_rate
+
+    return samples, sr
 
 
 # ---- 3C. Mix voice + music ----
 def mix_audio(voice, voice_sr, music, music_sr, music_volume=0.25):
-    # Simple resample of music if needed (by slicing)
     if music_sr != voice_sr:
         factor = music_sr / voice_sr
         step = max(int(round(factor)), 1)
         music = music[::step]
 
-    # Loop or trim music to match voice length
     if len(music) < len(voice):
         repeats = int(np.ceil(len(voice) / len(music)))
         music = np.tile(music, repeats)
     music = music[:len(voice)]
 
-    # Mix audio
     mixed = voice + music_volume * music
 
-    # Normalize
     max_val = np.max(np.abs(mixed))
     if max_val > 0:
         mixed = mixed / max_val
@@ -103,14 +108,14 @@ def mix_audio(voice, voice_sr, music, music_sr, music_volume=0.25):
     return mixed, voice_sr
 
 
-# ---- 3D. Save audio to WAV (no SciPy) ----
+# ---- 3D. Save audio to WAV ----
 def save_audio(audio, sr):
     audio_int16 = (audio * 32767).astype(np.int16)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
         with wave.open(fp.name, "wb") as wav_file:
-            wav_file.setnchannels(1)      # mono
-            wav_file.setsampwidth(2)      # 16-bit
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
             wav_file.setframerate(sr)
             wav_file.writeframes(audio_int16.tobytes())
         return fp.name
@@ -126,12 +131,7 @@ st.write("Upload an image → get a caption → generate a magical kids story �
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_image is not None:
-    try:
-        image = Image.open(uploaded_image).convert("RGB")
-    except Exception:
-        st.error("Invalid image file. Please upload a valid JPG or PNG.")
-        st.stop()
-
+    image = Image.open(uploaded_image).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Generate Story"):
@@ -154,7 +154,7 @@ if uploaded_image is not None:
 
         # Step 4: Background music
         with st.spinner("Adding cheerful background music..."):
-            music_audio, music_sr = generate_music()
+            music_audio, music_sr = load_music_from_github()
             mixed_audio, mixed_sr = mix_audio(voice_audio, sr, music_audio, music_sr)
 
         # Step 5: Save and play
@@ -165,6 +165,7 @@ if uploaded_image is not None:
 
     if st.button("Clear"):
         st.experimental_rerun()
+
 
 
 
