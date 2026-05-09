@@ -6,7 +6,6 @@ import tempfile
 import wave
 import requests
 import io
-from pydub import AudioSegment
 
 # =========================
 # FUNCTION PART
@@ -71,20 +70,23 @@ def generate_voice_audio(text):
 
 
 # ---- 3B. Load cheerful background music (MP3 from GitHub RAW URL) ----
+@st.cache_resource
+def get_mp3_decoder():
+    return pipeline("audio-classification", model="hf-audio/encodec_32khz")
+
 def load_music_from_github():
     url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.mp3"
 
     response = requests.get(url)
     audio_bytes = io.BytesIO(response.content)
 
-    music_seg = AudioSegment.from_file(audio_bytes, format="mp3")
+    decoder = get_mp3_decoder()
+    decoded = decoder(audio_bytes)
 
-    samples = np.array(music_seg.get_array_of_samples()).astype(np.float32)
-    samples = samples / 32767.0
+    audio = decoded["audio"]
+    sr = decoded["sampling_rate"]
 
-    sr = music_seg.frame_rate
-
-    return samples, sr
+    return audio, sr
 
 
 # ---- 3C. Mix voice + music ----
@@ -135,29 +137,24 @@ if uploaded_image is not None:
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Generate Story"):
-        # Step 1: Caption
         with st.spinner("Generating caption..."):
             caption = img2text(image)
         st.success("Caption generated!")
         st.write(f"**Caption:** {caption}")
 
-        # Step 2: Story
         with st.spinner("Writing cheerful story..."):
             story = text2story(caption)
         st.success("Story created!")
         st.write("### 📘 Your Story")
         st.write(story)
 
-        # Step 3: Voice
         with st.spinner("Creating friendly voice..."):
             voice_audio, sr = generate_voice_audio(story)
 
-        # Step 4: Background music
         with st.spinner("Adding cheerful background music..."):
             music_audio, music_sr = load_music_from_github()
             mixed_audio, mixed_sr = mix_audio(voice_audio, sr, music_audio, music_sr)
 
-        # Step 5: Save and play
         audio_path = save_audio(mixed_audio, mixed_sr)
 
         st.success("Audio ready!")
