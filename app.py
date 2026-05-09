@@ -27,51 +27,41 @@ def img2text(image):
     return model(image)[0]["generated_text"]
 
 
-# ---- 2. Caption → Story (STRICT, cheerful, magical, 50–100 words) ----
+# ---- 2. Caption → Story (FLAN‑T5, accurate, kid‑friendly, 50–100 words) ----
 @st.cache_resource
 def get_story_model():
-    return pipeline("text-generation", model="gpt2")
+    return pipeline("text2text-generation", model="google/flan-t5-base")
 
 def text2story(caption):
     model = get_story_model()
 
     prompt = (
-        f"The following is a description of an image: '{caption}'.\n\n"
-        "Write a 50–100 word children's story based STRICTLY on this description. "
-        "Do NOT add unrelated objects, characters, or events. "
-        "Keep all details consistent with the caption.\n\n"
-        "Make the story cheerful, magical, imaginative, and easy for young kids to enjoy. "
-        "Add gentle fantasy elements (sparkles, friendly creatures, soft magic) "
-        "but ONLY if they fit naturally with the caption.\n\n"
+        f"Image caption: {caption}\n\n"
+        "Write a 50–100 word children's story based strictly on this caption. "
+        "Do not add unrelated objects or events. "
+        "Make the story cheerful, magical, and easy for young kids. "
+        "Add gentle fantasy elements only if they fit naturally.\n\n"
         "Story:"
     )
 
     output = model(
         prompt,
         max_new_tokens=180,
-        do_sample=True,
-        temperature=0.6,
-        top_p=0.9,
-        repetition_penalty=2.2
+        temperature=0.5,
+        top_p=0.9
     )[0]["generated_text"]
 
-    # Remove the prompt from the output
-    if output.startswith(prompt):
-        output = output[len(prompt):].strip()
-
-    # Clean up the story
-    sentences = output.split(".")
-    cleaned = ". ".join(s.strip() for s in sentences if s.strip())
-    cleaned = cleaned.strip() + "."
+    # Clean up
+    story = output.strip()
+    words = story.split()
 
     # Enforce 50–100 words
-    words = cleaned.split()
     if len(words) < 50:
-        cleaned += " Soft sparkles of magic floated gently in the air, making everything feel warm and full of wonder."
+        story += " Soft sparkles of magic floated gently around, making the moment feel warm and full of wonder."
     elif len(words) > 100:
-        cleaned = " ".join(words[:100]) + "."
+        story = " ".join(words[:100]) + "."
 
-    return cleaned
+    return story
 
 
 # ---- 3. Story → Voice (Hugging Face TTS) ----
