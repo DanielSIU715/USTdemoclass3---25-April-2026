@@ -18,21 +18,37 @@ background_music_url = "https://raw.githubusercontent.com/DanielSIU715/USTdemocl
 
 st.markdown(
     f"""
-    <audio id="bgm" autoplay loop muted>
-        <source src="{background_music_url}" type="audio/wav">
+    <audio id="bgm" loop>
+        <source src="https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav" type="audio/wav">
     </audio>
 
     <script>
-        // Unmute after 1 second (bypasses browser autoplay restrictions)
-        setTimeout(() => {{
-            var audio = document.getElementById('bgm');
-            audio.muted = false;
-            audio.volume = 0.4;   // Adjust background music volume
-        }}, 1000);
+        const audio = document.getElementById('bgm');
+        audio.volume = 0.4;
+
+        // Start muted (allowed by browser)
+        audio.muted = true;
+        audio.play().then(() => {{
+            // After playback starts, unmute
+            setTimeout(() => {{
+                audio.muted = false;
+            }}, 500);
+        }}).catch((e) => {{
+            // If blocked, retry after user scrolls or moves mouse
+            document.addEventListener('click', () => {{
+                audio.play();
+                audio.muted = false;
+            }});
+            document.addEventListener('mousemove', () => {{
+                audio.play();
+                audio.muted = false;
+            }});
+        }});
     </script>
     """,
     unsafe_allow_html=True
 )
+
 
 st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice.")
 
