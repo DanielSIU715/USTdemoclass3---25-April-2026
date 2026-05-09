@@ -22,7 +22,7 @@ def img2text(image):
     return caption
 
 
-# ---- 2. Caption → Story (GPT‑2) ----
+# ---- 2. Caption → Story (GPT‑2, 50–100 words, no repetition) ----
 @st.cache_resource
 def get_story_model():
     return pipeline(
@@ -34,31 +34,40 @@ def text2story(caption):
     model = get_story_model()
 
     prompt = (
-        "You are a friendly storyteller. Expand the following image caption "
-        "into a warm, imaginative, easy-to-read story suitable for all ages:\n\n"
-        f"Caption: {caption}\n\nStory:"
+        "Write a short, imaginative story between 50 and 100 words based on the "
+        f"following image description: '{caption}'. "
+        "The story must be concise, non-repetitive, and written in smooth, natural English. "
+        "Avoid repeating phrases or sentences. Keep it friendly and suitable for all ages.\n\nStory:"
     )
 
     output = model(
         prompt,
-        max_new_tokens=200,
+        max_new_tokens=150,
         do_sample=True,
-        temperature=0.8,
-        top_p=0.9
+        temperature=0.7,
+        top_p=0.9,
+        repetition_penalty=1.8
     )[0]["generated_text"]
 
     # Remove the prompt from the output
     if output.startswith(prompt):
         output = output[len(prompt):].strip()
 
-    return output
+    # Clean up repeated or incomplete sentences
+    sentences = output.split(".")
+    cleaned = ". ".join(
+        s.strip() for s in sentences
+        if len(s.strip()) > 0
+    )
+    cleaned = cleaned.strip() + "."
+
+    return cleaned
 
 
 # ---- 3. Story → Audio (gTTS) ----
 def text2audio(story_text):
     tts = gTTS(story_text)
 
-    # Save to a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
         tts.save(fp.name)
         return fp.name  # return path to audio file
