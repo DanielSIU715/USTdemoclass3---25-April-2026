@@ -27,10 +27,10 @@ def img2text(image):
     return model(image)[0]["generated_text"]
 
 
-# ---- 2. Caption → Story (FLAN‑T5‑LARGE, accurate, imaginative, 50–100 words) ----
+# ---- 2. Caption → Story (FLAN‑T5‑BASE, improved prompt, no repetition) ----
 @st.cache_resource
 def get_story_model():
-    return pipeline("text2text-generation", model="google/flan-t5-large")
+    return pipeline("text2text-generation", model="google/flan-t5-base")
 
 def text2story(caption):
     model = get_story_model()
@@ -39,23 +39,27 @@ def text2story(caption):
         f"Image caption: {caption}\n\n"
         "Write a 50–100 word children's story based on this caption. "
         "The story must stay consistent with the caption, but you may add gentle, imaginative background details "
-        "that are not shown in the picture (such as friendly magic, soft sparkles, warm sunshine, or playful sounds). "
+        "that are not shown in the picture (like warm sunshine, sparkles, soft magic, or friendly sounds). "
         "Do NOT repeat sentences. Do NOT loop phrases. "
         "Make the story cheerful, magical, and easy for young kids.\n\n"
+        "Structure:\n"
+        "- 1 sentence describing the scene\n"
+        "- 2–3 sentences adding magical or cheerful background\n"
+        "- 1 sentence ending with a warm feeling\n\n"
         "Story:"
     )
 
     output = model(
         prompt,
-        max_new_tokens=200,
-        temperature=0.7,
+        max_new_tokens=180,
+        temperature=0.8,
         top_p=0.92,
-        repetition_penalty=3.0
+        repetition_penalty=3.5
     )[0]["generated_text"]
 
     story = output.strip()
 
-    # Remove repeated sentences if any
+    # Remove repeated sentences
     sentences = story.split(".")
     cleaned = []
     seen = set()
@@ -133,4 +137,3 @@ if uploaded_image:
 
     if st.button("Clear"):
         st.experimental_rerun()
-
