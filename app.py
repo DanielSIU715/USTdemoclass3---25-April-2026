@@ -35,8 +35,11 @@ def get_tts_model():
 
 @st.cache_resource
 def get_illustration_model():
-    # Cartoon / Pixar-like style via text-to-image
-    return pipeline("text-to-image", model="stabilityai/stable-diffusion-2-1")
+    # Lightweight CPU-friendly text-to-image model
+    return pipeline(
+        "text-to-image",
+        model="kandinsky-community/kandinsky-2-2-decoder"
+    )
 
 
 # =========================
@@ -59,26 +62,15 @@ def build_story_prompt(caption, mode):
     )
 
     if mode == "Fairy-tale":
-        style = (
-            "Write it in a soft fairy-tale style with friendly magic, kind creatures, and a cozy, happy ending.\n\n"
-        )
+        style = "Write it in a soft fairy-tale style with friendly magic and a cozy ending.\n\n"
     elif mode == "Adventure":
-        style = (
-            "Write it in a light adventure style with gentle excitement, small challenges, and a brave but safe feeling.\n\n"
-        )
+        style = "Write it in a light adventure style with gentle excitement.\n\n"
     elif mode == "Bedtime":
-        style = (
-            "Write it in a calm bedtime style with soothing words, gentle rhythms, and a peaceful, sleepy ending.\n\n"
-        )
+        style = "Write it in a calm bedtime style with soothing words.\n\n"
     elif mode == "Silly / Funny":
-        style = (
-            "Write it in a silly, funny style with playful surprises, giggles, and lighthearted moments.\n\n"
-        )
+        style = "Write it in a silly, funny style with playful humor.\n\n"
     elif mode == "Superhero":
-        style = (
-            "Write it in a gentle superhero style where the main character feels brave, kind, and helpful, "
-            "but everything stays safe and friendly.\n\n"
-        )
+        style = "Write it in a gentle superhero style, brave but friendly.\n\n"
     else:
         style = ""
 
@@ -130,7 +122,6 @@ def text2story(caption, mode):
 
 
 def generate_voice_audio(text, voice_style):
-    # Voice styles are conceptual; we lightly hint style in the text
     style_prefix = ""
     if voice_style == "Friendly narrator":
         style_prefix = "Read this in a warm, friendly storyteller voice: "
@@ -162,14 +153,14 @@ def generate_illustration(caption, mode):
 
     style_prompt = (
         "A cute, colorful, Pixar-like cartoon illustration for a children's story, "
-        "soft lighting, friendly atmosphere, high quality, digital art. "
+        "soft lighting, friendly atmosphere, digital art. "
     )
 
     mode_hint = ""
     if mode == "Fairy-tale":
         mode_hint = "fairy-tale magic, sparkles, gentle fantasy, "
     elif mode == "Adventure":
-        mode_hint = "light adventure, small journey, playful excitement, "
+        mode_hint = "light adventure, playful excitement, "
     elif mode == "Bedtime":
         mode_hint = "calm, cozy, bedtime mood, soft glow, "
     elif mode == "Silly / Funny":
@@ -179,10 +170,8 @@ def generate_illustration(caption, mode):
 
     full_prompt = style_prompt + mode_hint + f"based on: {caption}"
 
-    images = model(full_prompt, num_inference_steps=30, guidance_scale=7.5)
-    if isinstance(images, list):
-        return images[0]
-    return images.images[0] if hasattr(images, "images") else images
+    images = model(full_prompt, num_inference_steps=25)
+    return images[0]
 
 
 # =========================
@@ -267,3 +256,4 @@ if uploaded_image:
         st.session_state.last_audio_path = None
         st.session_state.last_illustration = None
         st.experimental_rerun()
+
