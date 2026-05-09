@@ -2,8 +2,8 @@ import streamlit as st
 from transformers import pipeline
 from PIL import Image
 import numpy as np
-from scipy.io.wavfile import write
 import tempfile
+import wave
 
 # =========================
 # FUNCTION PART
@@ -20,7 +20,7 @@ def img2text(image):
     return caption
 
 
-# ---- 2. Caption → Story (GPT‑2, cheerful kids version) ----
+# ---- 2. Caption → Story (GPT‑2, cheerful kids version, 50–100 words) ----
 @st.cache_resource
 def get_story_model():
     return pipeline("text-generation", model="gpt2")
@@ -67,7 +67,7 @@ def generate_voice_audio(text):
     return out["audio"], out["sampling_rate"]
 
 
-# ---- 3B. Generate cheerful background music ----
+# ---- 3B. Generate cheerful background music (MusicGen) ----
 @st.cache_resource
 def get_music_model():
     return pipeline("text-to-audio", model="facebook/musicgen-small")
@@ -80,31 +80,39 @@ def generate_music():
 
 # ---- 3C. Mix voice + music ----
 def mix_audio(voice, voice_sr, music, music_sr, music_volume=0.25):
-    # Resample music if needed
+    # Simple resample of music if needed (by slicing)
     if music_sr != voice_sr:
-        # Simple resample by slicing (Streamlit Cloud safe)
         factor = music_sr / voice_sr
-        music = music[::int(factor)]
+        step = max(int(round(factor)), 1)
+        music = music[::step]
 
-    # Trim or loop music to match voice length
+    # Loop or trim music to match voice length
     if len(music) < len(voice):
         repeats = int(np.ceil(len(voice) / len(music)))
         music = np.tile(music, repeats)
     music = music[:len(voice)]
 
-    # Mix
+    # Mix audio
     mixed = voice + music_volume * music
 
     # Normalize
-    mixed = mixed / np.max(np.abs(mixed))
+    max_val = np.max(np.abs(mixed))
+    if max_val > 0:
+        mixed = mixed / max_val
 
     return mixed, voice_sr
 
 
-# ---- 3D. Save audio to file ----
+# ---- 3D. Save audio to WAV (no SciPy) ----
 def save_audio(audio, sr):
+    audio_int16 = (audio * 32767).astype(np.int16)
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
-        write(fp.name, sr, (audio * 32767).astype(np.int16))
+        with wave.open(fp.name, "wb") as wav_file:
+            wav_file.setnchannels(1)      # mono
+            wav_file.setsampwidth(2)      # 16-bit
+            wav_file.setframerate(sr)
+            wav_file.writeframes(audio_int16.tobytes())
         return fp.name
 
 
@@ -112,13 +120,18 @@ def save_audio(audio, sr):
 # MAIN PART (Streamlit UI)
 # =========================
 
-st.title("📖 Image Storytelling App")
-st.write("Upload an image → get a cheerful caption → generate a magical kids story → listen to friendly audio with background music.")
+st.title("📖 Cheerful Kids' Image Storytelling App")
+st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice with cheerful background music.")
 
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_image is not None:
-    image = Image.open(uploaded_image).convert("RGB")
+    try:
+        image = Image.open(uploaded_image).convert("RGB")
+    except Exception:
+        st.error("Invalid image file. Please upload a valid JPG or PNG.")
+        st.stop()
+
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Generate Story"):
@@ -135,14 +148,16 @@ if uploaded_image is not None:
         st.write("### 📘 Your Story")
         st.write(story)
 
-        # Step 3: Audio
-        with st.spinner("Creating cheerful voice..."):
+        # Step 3: Voice
+        with st.spinner("Creating friendly voice..."):
             voice_audio, sr = generate_voice_audio(story)
 
+        # Step 4: Background music
         with st.spinner("Adding cheerful background music..."):
             music_audio, music_sr = generate_music()
             mixed_audio, mixed_sr = mix_audio(voice_audio, sr, music_audio, music_sr)
 
+        # Step 5: Save and play
         audio_path = save_audio(mixed_audio, mixed_sr)
 
         st.success("Audio ready!")
