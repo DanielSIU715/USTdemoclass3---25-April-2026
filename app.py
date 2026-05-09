@@ -69,24 +69,19 @@ def generate_voice_audio(text):
     return out["audio"], out["sampling_rate"]
 
 
-# ---- 3B. Load cheerful background music (MP3 from GitHub RAW URL) ----
-@st.cache_resource
-def get_mp3_decoder():
-    return pipeline("audio-classification", model="hf-audio/encodec_32khz")
-
+# ---- 3B. Load cheerful background music (WAV from GitHub RAW URL) ----
 def load_music_from_github():
-    url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.mp3"
+    url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav"
 
     response = requests.get(url)
     audio_bytes = io.BytesIO(response.content)
 
-    decoder = get_mp3_decoder()
-    decoded = decoder(audio_bytes)
+    with wave.open(audio_bytes, "rb") as wav_file:
+        sr = wav_file.getframerate()
+        frames = wav_file.readframes(wav_file.getnframes())
+        music = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32767.0
 
-    audio = decoded["audio"]
-    sr = decoded["sampling_rate"]
-
-    return audio, sr
+    return music, sr
 
 
 # ---- 3C. Mix voice + music ----
@@ -162,7 +157,3 @@ if uploaded_image is not None:
 
     if st.button("Clear"):
         st.experimental_rerun()
-
-
-
-
