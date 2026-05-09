@@ -1,11 +1,14 @@
 import streamlit as st
 from transformers import pipeline
 from PIL import Image
+from gtts import gTTS
+import tempfile
 
 # =========================
-# Function part
+# FUNCTION PART
 # =========================
 
+# ---- 1. Image → Caption (BLIP) ----
 @st.cache_resource
 def get_img2text_model():
     return pipeline(
@@ -13,6 +16,13 @@ def get_img2text_model():
         model="Salesforce/blip-image-captioning-base"
     )
 
+def img2text(image):
+    model = get_img2text_model()
+    caption = model(image)[0]["generated_text"]
+    return caption
+
+
+# ---- 2. Caption → Story (GPT‑2) ----
 @st.cache_resource
 def get_story_model():
     return pipeline(
@@ -20,31 +30,16 @@ def get_story_model():
         model="gpt2"
     )
 
-@st.cache_resource
-def get_tts_model():
-    return pipeline(
-        "text-to-speech",
-        model="facebook/mms-tts-eng"
-    )
-
-
-def img2text(image):
-    img2txt = get_img2text_model()
-    caption = img2txt(image)[0]["generated_text"]
-    return caption
-
-
 def text2story(caption):
-    story_model = get_story_model()
+    model = get_story_model()
 
     prompt = (
-        "You are a friendly storyteller. "
-        "Write a short, imaginative, heartwarming story based on this description: "
-        f"'{caption}'. "
-        "The story should be easy to understand, suitable for all ages, and around 3–5 paragraphs."
+        "You are a friendly storyteller. Expand the following image caption "
+        "into a warm, imaginative, easy-to-read story suitable for all ages:\n\n"
+        f"Caption: {caption}\n\nStory:"
     )
 
-    out = story_model(
+    output = model(
         prompt,
         max_new_tokens=200,
         do_sample=True,
@@ -52,27 +47,29 @@ def text2story(caption):
         top_p=0.9
     )[0]["generated_text"]
 
-    # Optionally trim the prompt from the beginning
-    if out.startswith(prompt):
-        out = out[len(prompt):].strip()
+    # Remove the prompt from the output
+    if output.startswith(prompt):
+        output = output[len(prompt):].strip()
 
-    return out
+    return output
 
 
+# ---- 3. Story → Audio (gTTS) ----
 def text2audio(story_text):
-    tts = get_tts_model()
-    audio_out = tts(story_text)
-    audio_array = audio_out["audio"]
-    sample_rate = audio_out["sampling_rate"]
-    return audio_array, sample_rate
+    tts = gTTS(story_text)
+
+    # Save to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+        tts.save(fp.name)
+        return fp.name  # return path to audio file
 
 
 # =========================
-# Main part (Streamlit UI)
+# MAIN PART (Streamlit UI)
 # =========================
 
 st.title("📖 Image Storytelling App")
-st.write("Upload an image, get a story, and listen to it as audio.")
+st.write("Upload an image → get a caption → generate a story → listen to the audio narration.")
 
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
@@ -86,27 +83,28 @@ if uploaded_image is not None:
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Generate Story"):
-        # 1. Image → Caption
-        with st.spinner("Analyzing image and generating caption..."):
+        # Step 1: Caption
+        with st.spinner("Generating caption..."):
             caption = img2text(image)
         st.success("Caption generated!")
         st.write(f"**Caption:** {caption}")
 
-        # 2. Caption → Story
+        # Step 2: Story
         with st.spinner("Writing story..."):
             story = text2story(caption)
         st.success("Story created!")
         st.write("### 📘 Your Story")
         st.write(story)
 
-        # 3. Story → Audio
+        # Step 3: Audio
         with st.spinner("Generating audio..."):
-            audio_array, sample_rate = text2audio(story)
+            audio_path = text2audio(story)
 
         st.success("Audio ready!")
-        st.audio(audio_array, sample_rate=sample_rate)
+        st.audio(audio_path)
 
     if st.button("Clear"):
         st.experimental_rerun()
+
 
 
