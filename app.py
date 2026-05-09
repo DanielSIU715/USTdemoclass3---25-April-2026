@@ -11,43 +11,91 @@ import io
 # =========================
 
 st.title("📖 Cheerful Kids' Image Storytelling App")
-st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice.")
+
+st.write(
+    "Upload an image → get a caption → choose a story mode and voice → "
+    "generate a magical kids story with illustration and audio."
+)
 
 # =========================
-# FUNCTION PART
+# MODELS
 # =========================
 
-# ---- 1. Image → Caption (BLIP) ----
 @st.cache_resource
 def get_img2text_model():
     return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
+
+@st.cache_resource
+def get_story_model():
+    return pipeline("text2text-generation", model="google/flan-t5-base")
+
+@st.cache_resource
+def get_tts_model():
+    return pipeline("text-to-speech", model="facebook/mms-tts-eng")
+
+@st.cache_resource
+def get_illustration_model():
+    # Cartoon / Pixar-like style via text-to-image
+    return pipeline("text-to-image", model="stabilityai/stable-diffusion-2-1")
+
+
+# =========================
+# HELPERS
+# =========================
 
 def img2text(image):
     model = get_img2text_model()
     return model(image)[0]["generated_text"]
 
 
-# ---- 2. Caption → Story (FLAN‑T5‑BASE, improved prompt, no repetition) ----
-@st.cache_resource
-def get_story_model():
-    return pipeline("text2text-generation", model="google/flan-t5-base")
-
-def text2story(caption):
-    model = get_story_model()
-
-    prompt = (
+def build_story_prompt(caption, mode):
+    base = (
         f"Image caption: {caption}\n\n"
         "Write a 50–100 word children's story based on this caption. "
         "The story must stay consistent with the caption, but you may add gentle, imaginative background details "
         "that are not shown in the picture (like warm sunshine, sparkles, soft magic, or friendly sounds). "
         "Do NOT repeat sentences. Do NOT loop phrases. "
         "Make the story cheerful, magical, and easy for young kids.\n\n"
+    )
+
+    if mode == "Fairy-tale":
+        style = (
+            "Write it in a soft fairy-tale style with friendly magic, kind creatures, and a cozy, happy ending.\n\n"
+        )
+    elif mode == "Adventure":
+        style = (
+            "Write it in a light adventure style with gentle excitement, small challenges, and a brave but safe feeling.\n\n"
+        )
+    elif mode == "Bedtime":
+        style = (
+            "Write it in a calm bedtime style with soothing words, gentle rhythms, and a peaceful, sleepy ending.\n\n"
+        )
+    elif mode == "Silly / Funny":
+        style = (
+            "Write it in a silly, funny style with playful surprises, giggles, and lighthearted moments.\n\n"
+        )
+    elif mode == "Superhero":
+        style = (
+            "Write it in a gentle superhero style where the main character feels brave, kind, and helpful, "
+            "but everything stays safe and friendly.\n\n"
+        )
+    else:
+        style = ""
+
+    structure = (
         "Structure:\n"
         "- 1 sentence describing the scene\n"
         "- 2–3 sentences adding magical or cheerful background\n"
         "- 1 sentence ending with a warm feeling\n\n"
         "Story:"
     )
+
+    return base + style + structure
+
+
+def text2story(caption, mode):
+    model = get_story_model()
+    prompt = build_story_prompt(caption, mode)
 
     output = model(
         prompt,
@@ -63,7 +111,6 @@ def text2story(caption):
     sentences = story.split(".")
     cleaned = []
     seen = set()
-
     for s in sentences:
         s = s.strip()
         if len(s) > 0 and s not in seen:
@@ -71,9 +118,9 @@ def text2story(caption):
             seen.add(s)
 
     story = ". ".join(cleaned).strip() + "."
-
-    # Enforce 50–100 words
     words = story.split()
+
+    # Enforce ~50–100 words
     if len(words) < 50:
         story += " Soft sparkles of magic drifted gently through the air, making everything feel warm and full of wonder."
     elif len(words) > 100:
@@ -82,18 +129,23 @@ def text2story(caption):
     return story
 
 
-# ---- 3. Story → Voice (Hugging Face TTS) ----
-@st.cache_resource
-def get_tts_model():
-    return pipeline("text-to-speech", model="facebook/mms-tts-eng")
+def generate_voice_audio(text, voice_style):
+    # Voice styles are conceptual; we lightly hint style in the text
+    style_prefix = ""
+    if voice_style == "Friendly narrator":
+        style_prefix = "Read this in a warm, friendly storyteller voice: "
+    elif voice_style == "Soft bedtime voice":
+        style_prefix = "Read this in a calm, gentle bedtime voice: "
+    elif voice_style == "Excited storyteller":
+        style_prefix = "Read this in an excited, joyful storyteller voice: "
+    elif voice_style == "Cartoonish voice":
+        style_prefix = "Read this in a playful, cartoonish voice: "
 
-def generate_voice_audio(text):
     tts = get_tts_model()
-    out = tts(text)
+    out = tts(style_prefix + text)
     return out["audio"], out["sampling_rate"]
 
 
-# ---- 4. Save audio to WAV ----
 def save_audio(audio, sr):
     audio_int16 = (audio * 32767).astype(np.int16)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
@@ -105,35 +157,119 @@ def save_audio(audio, sr):
         return fp.name
 
 
+def generate_illustration(caption, mode):
+    model = get_illustration_model()
+
+    style_prompt = (
+        "A cute, colorful, Pixar-like cartoon illustration for a children's story, "
+        "soft lighting, friendly atmosphere, high quality, digital art. "
+    )
+
+    mode_hint = ""
+    if mode == "Fairy-tale":
+        mode_hint = "fairy-tale magic, sparkles, gentle fantasy, "
+    elif mode == "Adventure":
+        mode_hint = "light adventure, small journey, playful excitement, "
+    elif mode == "Bedtime":
+        mode_hint = "calm, cozy, bedtime mood, soft glow, "
+    elif mode == "Silly / Funny":
+        mode_hint = "silly expressions, funny poses, playful humor, "
+    elif mode == "Superhero":
+        mode_hint = "cute superhero theme, cape, brave but friendly, "
+
+    full_prompt = style_prompt + mode_hint + f"based on: {caption}"
+
+    images = model(full_prompt, num_inference_steps=30, guidance_scale=7.5)
+    # transformers text-to-image returns list of images
+    if isinstance(images, list):
+        return images[0]
+    return images.images[0] if hasattr(images, "images") else images
+
+
 # =========================
-# MAIN APP LOGIC
+# SESSION STATE
 # =========================
 
+if "last_story" not in st.session_state:
+    st.session_state.last_story = None
+if "last_audio_path" not in st.session_state:
+    st.session_state.last_audio_path = None
+if "last_illustration" not in st.session_state:
+    st.session_state.last_illustration = None
+
+
+# =========================
+# CONTROLS
+# =========================
+
+story_mode = st.selectbox(
+    "Choose a story mode",
+    ["Fairy-tale", "Adventure", "Bedtime", "Silly / Funny", "Superhero"]
+)
+
+voice_style = st.selectbox(
+    "Choose a voice style",
+    ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"]
+)
+
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
+
+# =========================
+# MAIN LOGIC
+# =========================
 
 if uploaded_image:
     image = Image.open(uploaded_image).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    if st.button("Generate Story"):
+    if st.button("Generate Story, Illustration & Audio"):
         with st.spinner("Generating caption..."):
             caption = img2text(image)
         st.success("Caption generated!")
         st.write(f"**Caption:** {caption}")
 
         with st.spinner("Writing cheerful story..."):
-            story = text2story(caption)
+            story = text2story(caption, story_mode)
         st.success("Story created!")
         st.write("### 📘 Your Story")
         st.write(story)
 
+        with st.spinner("Creating illustration..."):
+            illustration = generate_illustration(caption, story_mode)
+        st.success("Illustration ready!")
+        st.image(illustration, caption="AI-generated illustration", use_column_width=True)
+
         with st.spinner("Creating friendly voice..."):
-            voice_audio, sr = generate_voice_audio(story)
+            voice_audio, sr = generate_voice_audio(story, voice_style)
 
         audio_path = save_audio(voice_audio, sr)
-
         st.success("Audio ready!")
         st.audio(audio_path)
+
+        # Save to session state for "Read Again"
+        st.session_state.last_story = story
+        st.session_state.last_audio_path = audio_path
+        st.session_state.last_illustration = illustration
+
+    # Read Again button (replay same audio & show same story/illustration)
+    if st.session_state.last_audio_path and st.button("🔁 Read Again"):
+        st.write("### 📘 Your Story")
+        st.write(st.session_state.last_story)
+
+        if st.session_state.last_illustration is not None:
+            st.image(
+                st.session_state.last_illustration,
+                caption="AI-generated illustration",
+                use_column_width=True
+            )
+
+        st.audio(st.session_state.last_audio_path)
+
+    if st.button("Clear"):
+        st.session_state.last_story = None
+        st.session_state.last_audio_path = None
+        st.session_state.last_illustration = None
+        st.experimental_rerun()
 
     if st.button("Clear"):
         st.experimental_rerun()
