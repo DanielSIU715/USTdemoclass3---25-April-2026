@@ -8,6 +8,26 @@ import requests
 import io
 
 # =========================
+# MAIN UI + AUTOPLAY MUSIC
+# =========================
+
+st.title("📖 Cheerful Kids' Image Storytelling App")
+
+# --- Autoplay background music ---
+background_music_url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav"
+
+st.markdown(
+    f"""
+    <audio autoplay loop>
+        <source src="{background_music_url}" type="audio/wav">
+    </audio>
+    """,
+    unsafe_allow_html=True
+)
+
+st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice with cheerful background music.")
+
+# =========================
 # FUNCTION PART
 # =========================
 
@@ -69,43 +89,7 @@ def generate_voice_audio(text):
     return out["audio"], out["sampling_rate"]
 
 
-# ---- 3B. Load cheerful background music (WAV from GitHub RAW URL) ----
-def load_music_from_github():
-    url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav"
-
-    response = requests.get(url)
-    audio_bytes = io.BytesIO(response.content)
-
-    with wave.open(audio_bytes, "rb") as wav_file:
-        sr = wav_file.getframerate()
-        frames = wav_file.readframes(wav_file.getnframes())
-        music = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32767.0
-
-    return music, sr
-
-
-# ---- 3C. Mix voice + music ----
-def mix_audio(voice, voice_sr, music, music_sr, music_volume=0.25):
-    if music_sr != voice_sr:
-        factor = music_sr / voice_sr
-        step = max(int(round(factor)), 1)
-        music = music[::step]
-
-    if len(music) < len(voice):
-        repeats = int(np.ceil(len(voice) / len(music)))
-        music = np.tile(music, repeats)
-    music = music[:len(voice)]
-
-    mixed = voice + music_volume * music
-
-    max_val = np.max(np.abs(mixed))
-    if max_val > 0:
-        mixed = mixed / max_val
-
-    return mixed, voice_sr
-
-
-# ---- 3D. Save audio to WAV ----
+# ---- 3B. Save audio to WAV ----
 def save_audio(audio, sr):
     audio_int16 = (audio * 32767).astype(np.int16)
 
@@ -119,11 +103,8 @@ def save_audio(audio, sr):
 
 
 # =========================
-# MAIN PART (Streamlit UI)
+# MAIN APP LOGIC
 # =========================
-
-st.title("📖 Cheerful Kids' Image Storytelling App")
-st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice with cheerful background music.")
 
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
@@ -146,14 +127,11 @@ if uploaded_image is not None:
         with st.spinner("Creating friendly voice..."):
             voice_audio, sr = generate_voice_audio(story)
 
-        with st.spinner("Adding cheerful background music..."):
-            music_audio, music_sr = load_music_from_github()
-            mixed_audio, mixed_sr = mix_audio(voice_audio, sr, music_audio, music_sr)
-
-        audio_path = save_audio(mixed_audio, mixed_sr)
+        audio_path = save_audio(voice_audio, sr)
 
         st.success("Audio ready!")
         st.audio(audio_path)
 
     if st.button("Clear"):
         st.experimental_rerun()
+
