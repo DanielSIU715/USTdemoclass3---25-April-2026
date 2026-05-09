@@ -4,7 +4,6 @@ from PIL import Image
 import numpy as np
 import tempfile
 import wave
-import io
 
 # =========================
 # MAIN UI
@@ -14,7 +13,7 @@ st.title("📖 Cheerful Kids' Image Storytelling App")
 
 st.write(
     "Upload an image → get a caption → choose a story mode and voice → "
-    "generate a magical kids story with illustration and audio."
+    "generate a magical kids story with audio."
 )
 
 # =========================
@@ -32,14 +31,6 @@ def get_story_model():
 @st.cache_resource
 def get_tts_model():
     return pipeline("text-to-speech", model="facebook/mms-tts-eng")
-
-@st.cache_resource
-def get_illustration_model():
-    # Lightweight CPU-friendly text-to-image model
-    return pipeline(
-        "text-to-image",
-        model="kandinsky-community/kandinsky-2-2-decoder"
-    )
 
 
 # =========================
@@ -148,32 +139,6 @@ def save_audio(audio, sr):
         return fp.name
 
 
-def generate_illustration(caption, mode):
-    model = get_illustration_model()
-
-    style_prompt = (
-        "A cute, colorful, Pixar-like cartoon illustration for a children's story, "
-        "soft lighting, friendly atmosphere, digital art. "
-    )
-
-    mode_hint = ""
-    if mode == "Fairy-tale":
-        mode_hint = "fairy-tale magic, sparkles, gentle fantasy, "
-    elif mode == "Adventure":
-        mode_hint = "light adventure, playful excitement, "
-    elif mode == "Bedtime":
-        mode_hint = "calm, cozy, bedtime mood, soft glow, "
-    elif mode == "Silly / Funny":
-        mode_hint = "silly expressions, funny poses, playful humor, "
-    elif mode == "Superhero":
-        mode_hint = "cute superhero theme, cape, brave but friendly, "
-
-    full_prompt = style_prompt + mode_hint + f"based on: {caption}"
-
-    images = model(full_prompt, num_inference_steps=25)
-    return images[0]
-
-
 # =========================
 # SESSION STATE
 # =========================
@@ -182,8 +147,6 @@ if "last_story" not in st.session_state:
     st.session_state.last_story = None
 if "last_audio_path" not in st.session_state:
     st.session_state.last_audio_path = None
-if "last_illustration" not in st.session_state:
-    st.session_state.last_illustration = None
 
 
 # =========================
@@ -210,7 +173,7 @@ if uploaded_image:
     image = Image.open(uploaded_image).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
-    if st.button("Generate Story, Illustration & Audio"):
+    if st.button("Generate Story & Audio"):
         with st.spinner("Generating caption..."):
             caption = img2text(image)
         st.success("Caption generated!")
@@ -222,11 +185,6 @@ if uploaded_image:
         st.write("### 📘 Your Story")
         st.write(story)
 
-        with st.spinner("Creating illustration..."):
-            illustration = generate_illustration(caption, story_mode)
-        st.success("Illustration ready!")
-        st.image(illustration, caption="AI-generated illustration", use_column_width=True)
-
         with st.spinner("Creating friendly voice..."):
             voice_audio, sr = generate_voice_audio(story, voice_style)
 
@@ -236,24 +194,13 @@ if uploaded_image:
 
         st.session_state.last_story = story
         st.session_state.last_audio_path = audio_path
-        st.session_state.last_illustration = illustration
 
     if st.session_state.last_audio_path and st.button("🔁 Read Again"):
         st.write("### 📘 Your Story")
         st.write(st.session_state.last_story)
-
-        if st.session_state.last_illustration is not None:
-            st.image(
-                st.session_state.last_illustration,
-                caption="AI-generated illustration",
-                use_column_width=True
-            )
-
         st.audio(st.session_state.last_audio_path)
 
     if st.button("Reset App"):
         st.session_state.last_story = None
         st.session_state.last_audio_path = None
-        st.session_state.last_illustration = None
         st.experimental_rerun()
-
