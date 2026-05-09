@@ -1,7 +1,8 @@
 import streamlit as st
 from transformers import pipeline
 from PIL import Image
-from gtts import gTTS
+import numpy as np
+from scipy.io.wavfile import write
 import tempfile
 
 # =========================
@@ -11,10 +12,7 @@ import tempfile
 # ---- 1. Image → Caption (BLIP) ----
 @st.cache_resource
 def get_img2text_model():
-    return pipeline(
-        "image-to-text",
-        model="Salesforce/blip-image-captioning-base"
-    )
+    return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
 
 def img2text(image):
     model = get_img2text_model()
@@ -22,55 +20,92 @@ def img2text(image):
     return caption
 
 
-# ---- 2. Caption → Story (GPT‑2, 50–100 words, no repetition) ----
+# ---- 2. Caption → Story (GPT‑2, cheerful kids version) ----
 @st.cache_resource
 def get_story_model():
-    return pipeline(
-        "text-generation",
-        model="gpt2"
-    )
+    return pipeline("text-generation", model="gpt2")
 
 def text2story(caption):
     model = get_story_model()
 
     prompt = (
-        "Write a short, imaginative story between 50 and 100 words based on the "
-        f"following image description: '{caption}'. "
-        "The story must be concise, non-repetitive, and written in smooth, natural English. "
-        "Avoid repeating phrases or sentences. Keep it friendly and suitable for all ages.\n\nStory:"
+        "You are a joyful children's storyteller. Write a cheerful, magical, and fun story "
+        "between 50 and 100 words based on the following image description: "
+        f"'{caption}'. "
+        "The story must be lively, imaginative, and suitable for young kids. "
+        "Use simple, happy language and add a sense of wonder. "
+        "Avoid repeating sentences or phrases. End the story with a warm, positive feeling.\n\nStory:"
     )
 
     output = model(
         prompt,
         max_new_tokens=150,
         do_sample=True,
-        temperature=0.7,
+        temperature=0.75,
         top_p=0.9,
-        repetition_penalty=1.8
+        repetition_penalty=2.0
     )[0]["generated_text"]
 
-    # Remove the prompt from the output
     if output.startswith(prompt):
         output = output[len(prompt):].strip()
 
-    # Clean up repeated or incomplete sentences
     sentences = output.split(".")
-    cleaned = ". ".join(
-        s.strip() for s in sentences
-        if len(s.strip()) > 0
-    )
+    cleaned = ". ".join(s.strip() for s in sentences if len(s.strip()) > 0)
     cleaned = cleaned.strip() + "."
 
     return cleaned
 
 
-# ---- 3. Story → Audio (gTTS) ----
-def text2audio(story_text):
-    tts = gTTS(story_text)
+# ---- 3A. Story → Voice (cheerful Hugging Face TTS) ----
+@st.cache_resource
+def get_tts_model():
+    return pipeline("text-to-speech", model="facebook/mms-tts-eng")
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-        tts.save(fp.name)
-        return fp.name  # return path to audio file
+def generate_voice_audio(text):
+    tts = get_tts_model()
+    out = tts(text)
+    return out["audio"], out["sampling_rate"]
+
+
+# ---- 3B. Generate cheerful background music ----
+@st.cache_resource
+def get_music_model():
+    return pipeline("text-to-audio", model="facebook/musicgen-small")
+
+def generate_music():
+    music_model = get_music_model()
+    music = music_model("happy cheerful kids music", max_new_tokens=256)
+    return music["audio"], music["sampling_rate"]
+
+
+# ---- 3C. Mix voice + music ----
+def mix_audio(voice, voice_sr, music, music_sr, music_volume=0.25):
+    # Resample music if needed
+    if music_sr != voice_sr:
+        # Simple resample by slicing (Streamlit Cloud safe)
+        factor = music_sr / voice_sr
+        music = music[::int(factor)]
+
+    # Trim or loop music to match voice length
+    if len(music) < len(voice):
+        repeats = int(np.ceil(len(voice) / len(music)))
+        music = np.tile(music, repeats)
+    music = music[:len(voice)]
+
+    # Mix
+    mixed = voice + music_volume * music
+
+    # Normalize
+    mixed = mixed / np.max(np.abs(mixed))
+
+    return mixed, voice_sr
+
+
+# ---- 3D. Save audio to file ----
+def save_audio(audio, sr):
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
+        write(fp.name, sr, (audio * 32767).astype(np.int16))
+        return fp.name
 
 
 # =========================
@@ -78,17 +113,12 @@ def text2audio(story_text):
 # =========================
 
 st.title("📖 Image Storytelling App")
-st.write("Upload an image → get a caption → generate a story → listen to the audio narration.")
+st.write("Upload an image → get a cheerful caption → generate a magical kids story → listen to friendly audio with background music.")
 
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 if uploaded_image is not None:
-    try:
-        image = Image.open(uploaded_image).convert("RGB")
-    except Exception:
-        st.error("Invalid image file. Please upload a valid JPG or PNG.")
-        st.stop()
-
+    image = Image.open(uploaded_image).convert("RGB")
     st.image(image, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Generate Story"):
@@ -99,15 +129,21 @@ if uploaded_image is not None:
         st.write(f"**Caption:** {caption}")
 
         # Step 2: Story
-        with st.spinner("Writing story..."):
+        with st.spinner("Writing cheerful story..."):
             story = text2story(caption)
         st.success("Story created!")
         st.write("### 📘 Your Story")
         st.write(story)
 
         # Step 3: Audio
-        with st.spinner("Generating audio..."):
-            audio_path = text2audio(story)
+        with st.spinner("Creating cheerful voice..."):
+            voice_audio, sr = generate_voice_audio(story)
+
+        with st.spinner("Adding cheerful background music..."):
+            music_audio, music_sr = generate_music()
+            mixed_audio, mixed_sr = mix_audio(voice_audio, sr, music_audio, music_sr)
+
+        audio_path = save_audio(mixed_audio, mixed_sr)
 
         st.success("Audio ready!")
         st.audio(audio_path)
