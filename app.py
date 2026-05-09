@@ -27,36 +27,51 @@ def img2text(image):
     return model(image)[0]["generated_text"]
 
 
-# ---- 2. Caption → Story (GPT‑2, cheerful kids version, 50–100 words) ----
+# ---- 2. Caption → Story (STRICT, cheerful, magical, 50–100 words) ----
 @st.cache_resource
 def get_story_model():
     return pipeline("text-generation", model="gpt2")
 
 def text2story(caption):
     model = get_story_model()
+
     prompt = (
-        "You are a joyful children's storyteller. Write a cheerful, magical, and fun story "
-        "between 50 and 100 words based on the following image description: "
-        f"'{caption}'. "
-        "The story must be lively, imaginative, and suitable for young kids. "
-        "Use simple, happy language and add a sense of wonder. "
-        "Avoid repeating sentences or phrases. End the story with a warm, positive feeling.\n\nStory:"
+        f"The following is a description of an image: '{caption}'.\n\n"
+        "Write a 50–100 word children's story based STRICTLY on this description. "
+        "Do NOT add unrelated objects, characters, or events. "
+        "Keep all details consistent with the caption.\n\n"
+        "Make the story cheerful, magical, imaginative, and easy for young kids to enjoy. "
+        "Add gentle fantasy elements (sparkles, friendly creatures, soft magic) "
+        "but ONLY if they fit naturally with the caption.\n\n"
+        "Story:"
     )
+
     output = model(
         prompt,
-        max_new_tokens=150,
+        max_new_tokens=180,
         do_sample=True,
-        temperature=0.75,
+        temperature=0.6,
         top_p=0.9,
-        repetition_penalty=2.0
+        repetition_penalty=2.2
     )[0]["generated_text"]
 
+    # Remove the prompt from the output
     if output.startswith(prompt):
         output = output[len(prompt):].strip()
 
+    # Clean up the story
     sentences = output.split(".")
     cleaned = ". ".join(s.strip() for s in sentences if s.strip())
-    return cleaned + "."
+    cleaned = cleaned.strip() + "."
+
+    # Enforce 50–100 words
+    words = cleaned.split()
+    if len(words) < 50:
+        cleaned += " Soft sparkles of magic floated gently in the air, making everything feel warm and full of wonder."
+    elif len(words) > 100:
+        cleaned = " ".join(words[:100]) + "."
+
+    return cleaned
 
 
 # ---- 3. Story → Voice (Hugging Face TTS) ----
