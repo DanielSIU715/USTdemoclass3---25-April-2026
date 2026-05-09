@@ -1,24 +1,26 @@
-# Program title: Storytelling App
 import streamlit as st
 from transformers import pipeline
 from PIL import Image
 
-# Streamlit UI
-print("Title: Age Classification using ViT")
+st.title("Age Classification using ViT")
 
-# Load the age classification pipeline
-# The code below should be placed in the main part of the program
-age_classifier = pipeline("image-classification",
-                          model="nateraw/vit-age-classifier")
+@st.cache_resource
+def load_model():
+    return pipeline("image-classification", model="nateraw/vit-age-classifier")
 
-image_name = "middleagedMan.jpg"
-image_name = Image.open(image_name).convert("RGB")
+age_classifier = load_model()
 
-# Classify age
-age_predictions = age_classifier(image_name)
-print(age_predictions)
-age_predictions = sorted(age_predictions, key=lambda x: x['score'], reverse=True)
+uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
-# Display results
-print("Predicted Age Range:")
-print(f"Age range: {age_predictions[0]['label']}")
+if uploaded_image is not None:
+    image = Image.open(uploaded_image).convert("RGB")
+    st.image(image, caption="Uploaded Image", use_column_width=True)
+
+    if st.button("Predict Age"):
+        with st.spinner("Classifying age..."):
+            preds = age_classifier(image)
+            preds = sorted(preds, key=lambda x: x["score"], reverse=True)
+
+        st.success("Prediction complete")
+        st.write(f"**Predicted Age Range:** {preds[0]['label']}")
+
