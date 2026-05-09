@@ -180,7 +180,6 @@ def generate_illustration(caption, mode):
     full_prompt = style_prompt + mode_hint + f"based on: {caption}"
 
     images = model(full_prompt, num_inference_steps=30, guidance_scale=7.5)
-    # transformers text-to-image returns list of images
     if isinstance(images, list):
         return images[0]
     return images.images[0] if hasattr(images, "images") else images
@@ -246,12 +245,10 @@ if uploaded_image:
         st.success("Audio ready!")
         st.audio(audio_path)
 
-        # Save to session state for "Read Again"
         st.session_state.last_story = story
         st.session_state.last_audio_path = audio_path
         st.session_state.last_illustration = illustration
 
-    # Read Again button (replay same audio & show same story/illustration)
     if st.session_state.last_audio_path and st.button("🔁 Read Again"):
         st.write("### 📘 Your Story")
         st.write(st.session_state.last_story)
@@ -265,11 +262,8 @@ if uploaded_image:
 
         st.audio(st.session_state.last_audio_path)
 
-    if st.button("Clear"):
+    if st.button("Reset App"):
         st.session_state.last_story = None
         st.session_state.last_audio_path = None
         st.session_state.last_illustration = None
-        st.experimental_rerun()
-
-    if st.button("Clear"):
         st.experimental_rerun()
