@@ -2,7 +2,5 @@ streamlit
 transformers<5
 torch
 pillow
-pydub
-ffmpeg-python
 numpy
 requests
