@@ -4,80 +4,20 @@ from PIL import Image
 import numpy as np
 import tempfile
 import wave
-import requests
 import io
-import base64
 
 # =========================
-# GENERATE SILENT WAV (Option C)
-# =========================
-
-def generate_silent_wav_base64(duration_ms=1000, sr=44100):
-    """Generate a silent WAV file and return it as a base64 data URL."""
-    num_samples = int(sr * (duration_ms / 1000))
-    silent_audio = (np.zeros(num_samples)).astype(np.int16)
-
-    with io.BytesIO() as buffer:
-        with wave.open(buffer, "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(sr)
-            wav_file.writeframes(silent_audio.tobytes())
-        wav_bytes = buffer.getvalue()
-
-    b64 = base64.b64encode(wav_bytes).decode("utf-8")
-    return f"data:audio/wav;base64,{b64}"
-
-
-# =========================
-# MAIN UI + AUTOPLAY MUSIC
+# MAIN UI
 # =========================
 
 st.title("📖 Cheerful Kids' Image Storytelling App")
-
-silent_wav_url = generate_silent_wav_base64()
-
-st.markdown(
-    f"""
-    <!-- Silent unlock audio -->
-    <audio id="unlock" autoplay>
-        <source src="{silent_wav_url}" type="audio/wav">
-    </audio>
-
-    <!-- Real background music -->
-    <audio id="bgm" loop>
-        <source src="https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav" type="audio/wav">
-    </audio>
-
-    <script>
-        const unlock = document.getElementById('unlock');
-        const bgm = document.getElementById('bgm');
-        bgm.volume = 0.4;
-
-        unlock.onplay = () => {{
-            setTimeout(() => {{
-                bgm.play();
-            }}, 200);
-        }};
-
-        document.addEventListener('click', () => {{
-            bgm.play();
-        }});
-        document.addEventListener('mousemove', () => {{
-            bgm.play();
-        }});
-    </script>
-    """,
-    unsafe_allow_html=True
-)
-
 st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice.")
-
 
 # =========================
 # FUNCTION PART
 # =========================
 
+# ---- 1. Image → Caption (BLIP) ----
 @st.cache_resource
 def get_img2text_model():
     return pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
@@ -87,6 +27,7 @@ def img2text(image):
     return model(image)[0]["generated_text"]
 
 
+# ---- 2. Caption → Story (GPT‑2, cheerful kids version, 50–100 words) ----
 @st.cache_resource
 def get_story_model():
     return pipeline("text-generation", model="gpt2")
@@ -101,14 +42,24 @@ def text2story(caption):
         "Use simple, happy language and add a sense of wonder. "
         "Avoid repeating sentences or phrases. End the story with a warm, positive feeling.\n\nStory:"
     )
-    output = model(prompt, max_new_tokens=150, do_sample=True, temperature=0.75, top_p=0.9, repetition_penalty=2.0)[0]["generated_text"]
+    output = model(
+        prompt,
+        max_new_tokens=150,
+        do_sample=True,
+        temperature=0.75,
+        top_p=0.9,
+        repetition_penalty=2.0
+    )[0]["generated_text"]
+
     if output.startswith(prompt):
         output = output[len(prompt):].strip()
+
     sentences = output.split(".")
     cleaned = ". ".join(s.strip() for s in sentences if s.strip())
     return cleaned + "."
 
 
+# ---- 3. Story → Voice (Hugging Face TTS) ----
 @st.cache_resource
 def get_tts_model():
     return pipeline("text-to-speech", model="facebook/mms-tts-eng")
@@ -119,6 +70,7 @@ def generate_voice_audio(text):
     return out["audio"], out["sampling_rate"]
 
 
+# ---- 4. Save audio to WAV ----
 def save_audio(audio, sr):
     audio_int16 = (audio * 32767).astype(np.int16)
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as fp:
