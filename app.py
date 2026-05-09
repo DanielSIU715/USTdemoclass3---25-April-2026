@@ -13,19 +13,29 @@ import io
 
 st.title("📖 Cheerful Kids' Image Storytelling App")
 
-# --- Autoplay background music ---
+# --- Autoplay background music (Option A: muted → unmute with JS) ---
 background_music_url = "https://raw.githubusercontent.com/DanielSIU715/USTdemoclass3---25-April-2026/main/assets/cheerful_music.wav"
 
 st.markdown(
     f"""
-    <audio autoplay loop>
+    <audio id="bgm" autoplay loop muted>
         <source src="{background_music_url}" type="audio/wav">
     </audio>
+
+    <script>
+        // Unmute after 1 second (bypasses browser autoplay restrictions)
+        setTimeout(() => {{
+            var audio = document.getElementById('bgm');
+            audio.muted = false;
+            audio.volume = 0.4;   // Adjust background music volume
+        }}, 1000);
+    </script>
     """,
     unsafe_allow_html=True
 )
 
-st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice with cheerful background music.")
+st.write("Upload an image → get a caption → generate a magical kids story → listen to a friendly voice.")
+
 
 # =========================
 # FUNCTION PART
@@ -134,4 +144,3 @@ if uploaded_image is not None:
 
     if st.button("Clear"):
         st.experimental_rerun()
-
