@@ -1,8 +1,9 @@
 streamlit
-transformers<5
+transformers>=4.33,<5
 torch
 pillow
 numpy
-requests
 librosa
 soundfile
+accelerate
+sentencepiece
