@@ -22,6 +22,79 @@ st.set_page_config(
 )
 
 # =========================
+# KID-FRIENDLY BACKGROUND
+# =========================
+
+st.markdown("""
+<style>
+.stApp {
+    background:
+        radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0) 18%),
+        radial-gradient(circle at 85% 15%, rgba(255, 244, 189, 0.65) 0%, rgba(255, 244, 189, 0) 20%),
+        radial-gradient(circle at 20% 85%, rgba(255, 214, 232, 0.55) 0%, rgba(255, 214, 232, 0) 22%),
+        radial-gradient(circle at 80% 80%, rgba(189, 234, 255, 0.55) 0%, rgba(189, 234, 255, 0) 20%),
+        linear-gradient(180deg, #fff9e8 0%, #ffeef6 45%, #eef9ff 100%);
+    background-attachment: fixed;
+}
+
+.stApp > header {
+    background: rgba(255, 255, 255, 0);
+}
+
+.block-container {
+    padding-top: 2rem;
+    padding-bottom: 2rem;
+}
+
+div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stFileUploader"]) {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(255, 193, 214, 0.65);
+    border-radius: 22px;
+    padding: 1rem 1rem 1.2rem 1rem;
+    box-shadow: 0 10px 30px rgba(201, 157, 123, 0.10);
+}
+
+div[data-testid="stButton"] > button {
+    border-radius: 999px;
+    border: none;
+    background: linear-gradient(135deg, #ff8fab 0%, #ff758f 100%);
+    color: white;
+    font-weight: 700;
+    padding: 0.65rem 1.2rem;
+    box-shadow: 0 8px 18px rgba(255, 117, 143, 0.25);
+}
+
+div[data-testid="stButton"] > button:hover {
+    background: linear-gradient(135deg, #ff7998 0%, #ff5c7c 100%);
+    color: white;
+}
+
+div[data-testid="stDownloadButton"] > button {
+    border-radius: 999px;
+    border: none;
+    background: linear-gradient(135deg, #7cc7ff 0%, #5caeff 100%);
+    color: white;
+    font-weight: 700;
+    padding: 0.65rem 1.2rem;
+    box-shadow: 0 8px 18px rgba(92, 174, 255, 0.25);
+}
+
+div[data-testid="stDownloadButton"] > button:hover {
+    background: linear-gradient(135deg, #64baff 0%, #439eff 100%);
+    color: white;
+}
+
+div[data-testid="stSuccess"] {
+    border-radius: 18px;
+}
+
+div[data-testid="stAlert"] {
+    border-radius: 18px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# =========================
 # SESSION STATE DEFAULTS
 # =========================
 
@@ -471,7 +544,7 @@ if st.session_state.last_audio_bytes:
     )
 
 if st.session_state.last_story or st.session_state.last_audio_bytes:
-    if st.button("🐻 Discuss with bears for another story!"):
+    if st.button("🐻 Discuss with bears for another story with a new image!"):
         reset_for_another_story()
 
 if st.session_state.uploaded_image_bytes is None:
