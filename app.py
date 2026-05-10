@@ -29,14 +29,11 @@ st.write(
 # =========================
 
 defaults = {
-    "story_mode": "Fairy-tale",
-    "voice_style": "Friendly narrator",
-    "voice_tone": "Neutral",
     "last_caption": None,
     "last_story": None,
     "last_audio_bytes": None,
     "last_uploaded_name": None,
-    "uploader_key": 0,
+    "reset_counter": 0,
 }
 
 for key, value in defaults.items():
@@ -189,8 +186,7 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone
     if pitch_steps != 0:
         audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=pitch_steps)
 
-    audio = np.clip(audio, -1.0, 1.0)
-    return audio
+    return np.clip(audio, -1.0, 1.0)
 
 def generate_voice_audio(text: str, voice_style: str, voice_tone: str):
     if not text.strip():
@@ -223,44 +219,49 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     return buffer.read()
 
 def reset_app():
-    st.session_state.story_mode = "Fairy-tale"
-    st.session_state.voice_style = "Friendly narrator"
-    st.session_state.voice_tone = "Neutral"
     st.session_state.last_caption = None
     st.session_state.last_story = None
     st.session_state.last_audio_bytes = None
     st.session_state.last_uploaded_name = None
-    st.session_state.uploader_key += 1
+    st.session_state.reset_counter += 1
     st.rerun()
 
 # =========================
-# CONTROLS
+# DYNAMIC WIDGET KEYS
 # =========================
+
+suffix = str(st.session_state.reset_counter)
 
 story_mode = st.selectbox(
     "Choose a story mode",
     ["Fairy-tale", "Adventure", "Bedtime", "Silly / Funny", "Superhero"],
-    key="story_mode"
+    index=0,
+    key=f"story_mode_{suffix}"
 )
 
 voice_style = st.selectbox(
     "Choose a voice style",
     ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"],
-    key="voice_style"
+    index=0,
+    key=f"voice_style_{suffix}"
 )
 
 voice_tone = st.selectbox(
     "Choose a voice tone",
     ["Neutral", "Lower", "Higher"],
-    key="voice_tone"
+    index=0,
+    key=f"voice_tone_{suffix}"
 )
 
-st.caption("Note: the voice tone changes the same base TTS voice slightly. It is not a true male/female speaker switch.")
+st.caption(
+    "Note: the voice tone changes the same base TTS voice slightly. "
+    "It is not a true male/female speaker switch."
+)
 
 uploaded_image = st.file_uploader(
     "Upload an image",
     type=["jpg", "jpeg", "png"],
-    key=f"uploader_{st.session_state.uploader_key}"
+    key=f"uploader_{suffix}"
 )
 
 # =========================
@@ -319,7 +320,8 @@ if uploaded_image is not None:
         except Exception as e:
             st.error(f"Something went wrong: {e}")
 
-    if st.button("Reset App"):
-        reset_app()
-else:
+if st.button("Reset App"):
+    reset_app()
+
+if uploaded_image is None:
     st.info("Please upload an image to begin.")
