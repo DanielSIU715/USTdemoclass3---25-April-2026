@@ -265,7 +265,7 @@ uploaded_image = st.file_uploader(
 )
 
 # =========================
-# MAIN LOGIC
+# IMAGE DISPLAY
 # =========================
 
 if uploaded_image is not None:
@@ -286,32 +286,15 @@ if uploaded_image is not None:
             if not caption:
                 st.error("Could not generate a caption from the image.")
             else:
-                st.success("Caption generated!")
-                st.write(f"**Caption:** {caption}")
-
                 with st.spinner("Writing cheerful story..."):
                     story = text2story(caption, story_mode, voice_style)
 
                 if not story:
                     st.error("Could not generate a story.")
                 else:
-                    st.success("Story created!")
-                    st.write("### 📘 Your Story")
-                    st.write(story)
-
                     with st.spinner("Creating voice audio..."):
                         voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
                         audio_bytes = audio_to_wav_bytes(voice_audio, sr)
-
-                    st.success("Audio ready!")
-                    st.audio(audio_bytes, format="audio/wav")
-
-                    st.download_button(
-                        "Download Audio",
-                        data=audio_bytes,
-                        file_name="kids_story.wav",
-                        mime="audio/wav"
-                    )
 
                     st.session_state.last_caption = caption
                     st.session_state.last_story = story
@@ -319,6 +302,29 @@ if uploaded_image is not None:
 
         except Exception as e:
             st.error(f"Something went wrong: {e}")
+
+# =========================
+# PERSISTENT RESULTS
+# =========================
+
+if st.session_state.last_caption:
+    st.success("Caption generated!")
+    st.write(f"**Caption:** {st.session_state.last_caption}")
+
+if st.session_state.last_story:
+    st.success("Story created!")
+    st.write("### 📘 Your Story")
+    st.write(st.session_state.last_story)
+
+if st.session_state.last_audio_bytes:
+    st.success("Audio ready!")
+    st.audio(st.session_state.last_audio_bytes, format="audio/wav")
+    st.download_button(
+        "Download Audio",
+        data=st.session_state.last_audio_bytes,
+        file_name="kids_story.wav",
+        mime="audio/wav"
+    )
 
 if st.button("Reset App"):
     reset_app()
