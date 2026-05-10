@@ -19,17 +19,12 @@ st.set_page_config(
     layout="centered"
 )
 
-st.title("📖 Cheerful Kids' Image Storytelling App")
-st.write(
-    "Upload an image, generate a caption, create a cheerful children's story, "
-    "and listen to it as audio."
-)
-
 # =========================
 # SESSION STATE DEFAULTS
 # =========================
 
 defaults = {
+    "entry_confirmed": None,   # None / True / False
     "uploaded_image_bytes": None,
     "uploaded_image_name": None,
     "last_caption": None,
@@ -341,6 +336,7 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     return buffer.read()
 
 def full_reset_app():
+    st.session_state.entry_confirmed = None
     st.session_state.uploaded_image_bytes = None
     st.session_state.uploaded_image_name = None
     st.session_state.last_caption = None
@@ -350,8 +346,44 @@ def full_reset_app():
     st.rerun()
 
 # =========================
-# DYNAMIC WIDGET KEYS
+# ENTRY GATE
 # =========================
+
+if st.session_state.entry_confirmed is None:
+    st.title("📖 Welcome")
+    st.warning(
+        "This website only generates stories for children under 18. "
+        "Do you confirm that you understand this before entering?"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Yes"):
+            st.session_state.entry_confirmed = True
+            st.rerun()
+
+    with col2:
+        if st.button("No"):
+            st.session_state.entry_confirmed = False
+            st.rerun()
+
+    st.stop()
+
+if st.session_state.entry_confirmed is False:
+    st.title("Access Notice")
+    st.error("Please leave this website.")
+    st.stop()
+
+# =========================
+# MAIN APP
+# =========================
+
+st.title("📖 Cheerful Kids' Image Storytelling App")
+st.write(
+    "Upload an image, generate a caption, create a cheerful children's story, "
+    "and listen to it as audio."
+)
 
 suffix = str(st.session_state.reset_counter)
 
@@ -387,10 +419,6 @@ uploaded_image = st.file_uploader(
     key=f"uploader_{suffix}"
 )
 
-# =========================
-# STORE UPLOADED IMAGE
-# =========================
-
 if uploaded_image is not None:
     uploaded_bytes = uploaded_image.getvalue()
 
@@ -403,10 +431,6 @@ if uploaded_image is not None:
         st.session_state.last_caption = None
         st.session_state.last_story = None
         st.session_state.last_audio_bytes = None
-
-# =========================
-# DISPLAY IMAGE
-# =========================
 
 if st.session_state.uploaded_image_bytes is not None:
     image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
@@ -432,10 +456,6 @@ if st.session_state.uploaded_image_bytes is not None:
 
         except Exception as e:
             st.error(f"Something went wrong: {e}")
-
-# =========================
-# RESULTS
-# =========================
 
 if st.session_state.last_caption:
     st.success("Caption generated!")
