@@ -21,7 +21,7 @@ st.set_page_config(
 
 st.title("📖 Cheerful Kids' Image Storytelling App")
 st.write(
-    "Upload an image, generate a caption, turn it into a cheerful children's story, "
+    "Upload an image, generate a caption, create a cheerful children's story, "
     "and listen to it as audio."
 )
 
@@ -84,37 +84,38 @@ def img2text(image: Image.Image) -> str:
     output = model(image)
     return output[0].get("generated_text", "").strip()
 
-def build_story_prompt(caption: str, mode: str, voice_style: str, story_seed: int) -> str:
+def build_story_prompt(caption: str, mode: str, voice_style: str) -> str:
     style_map = {
         "Fairy-tale": "Write it in a soft fairy-tale style.",
         "Adventure": "Write it in a playful adventure style.",
-        "Bedtime": "Write it in a calm and comforting bedtime style.",
-        "Silly / Funny": "Write it in a silly, funny, laugh-out-loud style.",
+        "Bedtime": "Write it in a calm bedtime style.",
+        "Silly / Funny": "Write it in a silly and funny style.",
         "Superhero": "Write it in a gentle superhero style."
     }
 
     voice_map = {
-        "Friendly narrator": "Use a warm and friendly narrator tone.",
+        "Friendly narrator": "Use a warm and friendly tone.",
         "Soft bedtime voice": "Use a calm and gentle tone.",
         "Excited storyteller": "Use an energetic and lively tone.",
         "Cartoonish voice": "Use a playful cartoon-like tone."
     }
 
+    random_seed = random.randint(1000, 999999)
+
     prompt = f"""
 Image caption: {caption}
 
-Write one brand new children's story of 50 to 100 words based on the image caption above.
-The story must clearly follow the caption.
-The story must match the selected style.
-Make the story cheerful, funny, playful, imaginative, and suitable for young kids.
-Use simple English.
+Write one unique children's story based on this caption.
+The story should be 50 to 100 words.
+Use simple English for kids.
+Make it cheerful, playful, funny, and imaginative.
+The story must follow the selected story mode.
 Do not repeat sentences.
 Do not repeat ideas.
-Do not use the same stock magical sentence every time.
-Make this version feel fresh and different.
-Random story version number: {story_seed}
+End the story with a happy feeling.
+Story version: {random_seed}
 
-Selected story mode: {mode}
+Selected mode: {mode}
 {style_map.get(mode, "")}
 {voice_map.get(voice_style, "")}
 
@@ -123,22 +124,24 @@ Story:
     return prompt.strip()
 
 def clean_story(text: str) -> str:
-    raw_sentences = text.replace("\n", " ").split(".")
+    text = text.replace("\n", " ").strip()
+
+    raw_sentences = text.split(".")
     cleaned = []
     seen = set()
 
     for sentence in raw_sentences:
         sentence = " ".join(sentence.strip().split())
-        key = sentence.lower()
-        if sentence and key not in seen:
+        normalized = sentence.lower()
+        if sentence and normalized not in seen:
             cleaned.append(sentence)
-            seen.add(key)
+            seen.add(normalized)
 
     if not cleaned:
         return ""
 
     story = ". ".join(cleaned).strip()
-    if story and not story.endswith("."):
+    if not story.endswith("."):
         story += "."
 
     words = story.split()
@@ -147,71 +150,61 @@ def clean_story(text: str) -> str:
 
     return story
 
-def generate_story_once(model, prompt: str) -> str:
-    output = model(
-        prompt,
-        max_new_tokens=160,
-        do_sample=True,
-        temperature=1.0,
-        top_p=0.95,
-        repetition_penalty=1.5,
-        no_repeat_ngram_size=3
-    )
-    return clean_story(output[0].get("generated_text", "").strip())
-
-def text2story(caption: str, mode: str, voice_style: str) -> str:
-    model = get_story_model()
-
-    story_seed = random.randint(1000, 999999)
-    prompt = build_story_prompt(caption, mode, voice_style, story_seed)
-    story = generate_story_once(model, prompt)
-
-    if 50 <= len(story.split()) <= 100:
+def expand_story_if_needed(caption: str, mode: str, story: str) -> str:
+    if len(story.split()) >= 50:
         return story
 
-    expand_seed = random.randint(1000, 999999)
+    model = get_story_model()
+
     expand_prompt = f"""
 Image caption: {caption}
 Story mode: {mode}
 
-Rewrite the following into one fresh children's story of 50 to 100 words.
-Make it cheerful, funny, playful, and suitable for kids.
-Keep it consistent with the caption.
-Do not repeat any sentence.
-Write a new version.
-Random rewrite version number: {expand_seed}
+Expand this children's story so it becomes 50 to 100 words.
+Keep it cheerful, funny, playful, and suitable for kids.
+Stay consistent with the caption.
+Do not repeat sentences.
+Write a fresh improved version.
 
 Current story:
 {story}
 
 Improved story:
 """
-    story = generate_story_once(model, expand_prompt)
+    output = model(
+        expand_prompt,
+        max_new_tokens=120,
+        do_sample=True,
+        temperature=0.9,
+        top_p=0.95,
+        repetition_penalty=1.4
+    )
 
-    if 50 <= len(story.split()) <= 100:
-        return story
+    expanded = output[0].get("generated_text", "").strip()
+    expanded = clean_story(expanded)
 
-    final_seed = random.randint(1000, 999999)
-    final_prompt = f"""
-Caption: {caption}
-Mode: {mode}
-Version: {final_seed}
+    if expanded:
+        return expanded
 
-Write a completely new children's story in 50 to 100 words.
-It must be based on the caption.
-It must be cheerful, funny, and imaginative.
-It must be different from previous outputs.
-No repeated lines.
-No filler sentence.
-End happily.
+    return story
 
-Story:
-"""
-    story = generate_story_once(model, final_prompt)
+def text2story(caption: str, mode: str, voice_style: str) -> str:
+    model = get_story_model()
+    prompt = build_story_prompt(caption, mode, voice_style)
 
-    words = story.split()
-    if len(words) > 100:
-        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
+    output = model(
+        prompt,
+        max_new_tokens=120,
+        do_sample=True,
+        temperature=0.9,
+        top_p=0.95,
+        repetition_penalty=1.4
+    )
+
+    story = output[0].get("generated_text", "").strip()
+    story = clean_story(story)
+    story = expand_story_if_needed(caption, mode, story)
+
     return story
 
 def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
@@ -240,9 +233,6 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone
     return np.clip(audio, -1.0, 1.0)
 
 def generate_voice_audio(text: str, voice_style: str, voice_tone: str):
-    if not text.strip():
-        raise ValueError("Story text is empty.")
-
     tts = get_tts_model()
     output = tts(text)
 
@@ -340,8 +330,8 @@ if uploaded_image is not None:
                 with st.spinner("Writing cheerful story..."):
                     story = text2story(caption, story_mode, voice_style)
 
-                if not story or len(story.split()) < 30:
-                    st.error("Could not generate a good story. Please try again.")
+                if not story:
+                    st.error("Could not generate a story.")
                 else:
                     with st.spinner("Creating voice audio..."):
                         voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
