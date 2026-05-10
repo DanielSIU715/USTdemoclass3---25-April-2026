@@ -13,7 +13,7 @@ from transformers import pipeline
 # PAGE CONFIG
 # =========================
 
-APP_TITLE = "Parent Bears are telling stories right now! Let's join with other little bears!"
+APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -26,7 +26,7 @@ st.set_page_config(
 # =========================
 
 defaults = {
-    "entry_confirmed": None,   # None / True / False
+    "entry_confirmed": None,
     "uploaded_image_bytes": None,
     "uploaded_image_name": None,
     "last_caption": None,
@@ -304,7 +304,6 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone
         pitch_steps -= 2
     elif voice_tone == "Teenage Bear":
         pitch_steps += 2
-    # Adult Bear = no extra change
 
     if pitch_steps != 0:
         audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=pitch_steps)
@@ -353,7 +352,7 @@ def full_reset_app():
 # =========================
 
 if st.session_state.entry_confirmed is None:
-    st.title("🐻 Welcome, Little Bear")
+    st.title("🐻 Welcome, Little Bear 🐾")
     st.warning(
         "This website only generates stories for children under 18. "
         "Do you understand and wish to enter?"
@@ -410,10 +409,6 @@ voice_tone = st.selectbox(
     key=f"voice_tone_{suffix}"
 )
 
-st.caption(
-    "Note: Adult Bear, Old Bear, and Teenage Bear are playful labels for different pitch effects on the same base Hugging Face TTS voice."
-)
-
 uploaded_image = st.file_uploader(
     "Upload an image",
     type=["jpg", "jpeg", "png"],
@@ -437,7 +432,7 @@ if st.session_state.uploaded_image_bytes is not None:
     image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    if st.button("Generate Story & Audio", type="primary"):
+    if st.button("🐻 Discuss with parent bears for a story", type="primary"):
         try:
             if not st.session_state.last_caption:
                 with st.spinner("📸 A tiny owl is peeking at your picture..."):
@@ -459,25 +454,24 @@ if st.session_state.uploaded_image_bytes is not None:
             st.error(f"Something went wrong: {e}")
 
 if st.session_state.last_caption:
-    st.success("Caption generated!")
-    st.write(f"**Caption:** {st.session_state.last_caption}")
+    st.success("🐻 Parent bears vote a theme of a story!")
+    st.write(f"**Story theme:** {st.session_state.last_caption}")
 
 if st.session_state.last_story:
-    st.success("Story created!")
-    st.write("### 📘 Your Story")
+    st.markdown("### 🐻 Parent bears are telling story now....")
     st.write(st.session_state.last_story)
 
 if st.session_state.last_audio_bytes:
-    st.success("Audio ready!")
+    st.success("🐻 Voice of the roarrrrr !")
     st.audio(st.session_state.last_audio_bytes, format="audio/wav")
     st.download_button(
-        "Download Audio",
+        "🐻 Download the voice of bear",
         data=st.session_state.last_audio_bytes,
         file_name="kids_story.wav",
         mime="audio/wav"
     )
 
-if st.button("Reset App"):
+if st.button("🐻 Discuss with bears for another story!"):
     full_reset_app()
 
 if st.session_state.uploaded_image_bytes is None:
