@@ -48,21 +48,21 @@ def build_story_prompt(caption, mode):
         f"Image caption: {caption}\n\n"
         "Write a 50–100 word children's story based on this caption. "
         "The story must stay consistent with the caption, but you may add gentle, imaginative background details "
-        "that are not shown in the picture (like warm sunshine, sparkles, soft magic, or friendly sounds). "
+        "that are not shown in the picture. "
         "Do NOT repeat sentences. Do NOT loop phrases. "
         "Make the story cheerful, magical, and easy for young kids.\n\n"
     )
 
     if mode == "Fairy-tale":
-        style = "Write it in a soft fairy-tale style with friendly magic and a cozy ending.\n\n"
+        style = "Write it in a soft fairy-tale style.\n\n"
     elif mode == "Adventure":
-        style = "Write it in a light adventure style with gentle excitement.\n\n"
+        style = "Write it in a light adventure style.\n\n"
     elif mode == "Bedtime":
-        style = "Write it in a calm bedtime style with soothing words.\n\n"
+        style = "Write it in a calm bedtime style.\n\n"
     elif mode == "Silly / Funny":
-        style = "Write it in a silly, funny style with playful humor.\n\n"
+        style = "Write it in a silly, funny style.\n\n"
     elif mode == "Superhero":
-        style = "Write it in a gentle superhero style, brave but friendly.\n\n"
+        style = "Write it in a gentle superhero style.\n\n"
     else:
         style = ""
 
@@ -106,7 +106,7 @@ def text2story(caption, mode):
 
     # Enforce ~50–100 words
     if len(words) < 50:
-        story += " Soft sparkles of magic drifted gently through the air, making everything feel warm and full of wonder."
+        story += " Soft sparkles of magic drifted gently through the air."
     elif len(words) > 100:
         story = " ".join(words[:100]) + "."
 
@@ -211,4 +211,3 @@ if uploaded_image:
         st.session_state.last_story = None
         st.session_state.last_audio_path = None
         st.experimental_rerun()
-
