@@ -47,7 +47,7 @@ for key, value in defaults.items():
 DEVICE = 0 if torch.cuda.is_available() else -1
 
 # =========================
-# MODELS
+# HUGGING FACE MODELS
 # =========================
 
 @st.cache_resource
@@ -86,36 +86,33 @@ def img2text(image: Image.Image) -> str:
 def build_story_prompt(caption: str, mode: str, voice_style: str) -> str:
     style_map = {
         "Fairy-tale": "Write it in a soft fairy-tale style.",
-        "Adventure": "Write it in a light adventure style.",
-        "Bedtime": "Write it in a calm bedtime style.",
-        "Silly / Funny": "Write it in a silly, funny style.",
+        "Adventure": "Write it in a playful adventure style.",
+        "Bedtime": "Write it in a calm and comforting bedtime style.",
+        "Silly / Funny": "Write it in a silly, funny, laugh-out-loud style.",
         "Superhero": "Write it in a gentle superhero style."
     }
 
     voice_map = {
         "Friendly narrator": "Use a warm and friendly narrator tone.",
-        "Soft bedtime voice": "Use a calm, sleepy, gentle tone.",
+        "Soft bedtime voice": "Use a calm and gentle tone.",
         "Excited storyteller": "Use an energetic and lively tone.",
-        "Cartoonish voice": "Use a playful and funny tone."
+        "Cartoonish voice": "Use a playful cartoon-like tone."
     }
 
     prompt = f"""
 Image caption: {caption}
 
-Write a 50 to 100 word children's story based on this caption.
-The story must stay consistent with the caption.
-You may add gentle and imaginative background details that are not shown in the picture.
+Write one unique children's story of about 60 to 90 words based on this image caption.
+The story must match the image closely.
+Add cheerful, funny, playful, and imaginative details suitable for young kids.
+Use simple words and clear sentences.
+Do not repeat ideas.
 Do not repeat sentences.
-Do not loop phrases.
-Make the story cheerful, magical, clear, and easy for young kids.
+Do not make a list.
+End with a happy or warm feeling.
 
 {style_map.get(mode, "")}
 {voice_map.get(voice_style, "")}
-
-Structure:
-- 1 sentence describing the scene
-- 2 to 3 sentences adding magical or cheerful background
-- 1 sentence ending with a warm feeling
 
 Story:
 """
@@ -141,9 +138,8 @@ def clean_story(text: str) -> str:
         story += "."
 
     words = story.split()
-    if len(words) < 50:
-        story += " Soft sparkles of magic drifted gently through the air."
-    elif len(words) > 100:
+
+    if len(words) > 100:
         story = " ".join(words[:100]).rstrip(".,;:! ") + "."
 
     return story
@@ -154,14 +150,70 @@ def text2story(caption: str, mode: str, voice_style: str) -> str:
 
     output = model(
         prompt,
-        max_new_tokens=180,
-        temperature=0.8,
-        top_p=0.92,
-        repetition_penalty=2.5
+        max_new_tokens=140,
+        do_sample=True,
+        temperature=0.9,
+        top_p=0.95,
+        repetition_penalty=1.8,
+        no_repeat_ngram_size=3
     )
 
     story = output[0].get("generated_text", "").strip()
-    return clean_story(story)
+    story = clean_story(story)
+
+    if len(story.split()) < 50:
+        expand_prompt = f"""
+Expand this children's story to about 60 to 90 words.
+Keep it cheerful, funny, playful, and suitable for kids.
+Stay consistent with the image description.
+Do not repeat sentences.
+
+Image caption: {caption}
+
+Current story:
+{story}
+
+Improved story:
+"""
+        output2 = model(
+            expand_prompt,
+            max_new_tokens=140,
+            do_sample=True,
+            temperature=0.95,
+            top_p=0.95,
+            repetition_penalty=1.6,
+            no_repeat_ngram_size=3
+        )
+        story = clean_story(output2[0].get("generated_text", "").strip())
+
+    words = story.split()
+    if len(words) < 50:
+        second_prompt = f"""
+Write a brand new children's story of 50 to 100 words.
+
+Image caption: {caption}
+Style: {mode}
+Tone: cheerful, funny, playful, simple, magical
+Avoid repetition.
+
+Story:
+"""
+        output3 = model(
+            second_prompt,
+            max_new_tokens=160,
+            do_sample=True,
+            temperature=1.0,
+            top_p=0.95,
+            repetition_penalty=1.5,
+            no_repeat_ngram_size=3
+        )
+        story = clean_story(output3[0].get("generated_text", "").strip())
+
+    words = story.split()
+    if len(words) > 100:
+        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
+
+    return story
 
 def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
     audio = np.asarray(audio, dtype=np.float32).squeeze()
@@ -254,7 +306,7 @@ voice_tone = st.selectbox(
 )
 
 st.caption(
-    "Note: the voice tone changes the same base TTS voice slightly. "
+    "Note: the voice tone changes the same base Hugging Face TTS voice slightly. "
     "It is not a true male/female speaker switch."
 )
 
@@ -265,7 +317,7 @@ uploaded_image = st.file_uploader(
 )
 
 # =========================
-# IMAGE DISPLAY
+# IMAGE + GENERATION
 # =========================
 
 if uploaded_image is not None:
