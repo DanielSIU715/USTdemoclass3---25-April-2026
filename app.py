@@ -337,8 +337,7 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-def full_reset_app():
-    st.session_state.entry_confirmed = None
+def reset_for_another_story():
     st.session_state.uploaded_image_bytes = None
     st.session_state.uploaded_image_name = None
     st.session_state.last_caption = None
@@ -471,8 +470,9 @@ if st.session_state.last_audio_bytes:
         mime="audio/wav"
     )
 
-if st.button("🐻 Discuss with bears for another story!"):
-    full_reset_app()
+if st.session_state.last_story or st.session_state.last_audio_bytes:
+    if st.button("🐻 Discuss with bears for another story!"):
+        reset_for_another_story()
 
 if st.session_state.uploaded_image_bytes is None:
     st.info("Please upload an image to begin.")
