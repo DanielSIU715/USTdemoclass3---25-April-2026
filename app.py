@@ -114,10 +114,11 @@ def text2story(caption, mode):
 
 
 def generate_voice_audio(text, voice_style, gender):
-    # No prefix — clean audio
     tts = get_tts_model()
     out = tts(text)
-    audio = out["audio"]
+
+    # Convert list → numpy array for librosa
+    audio = np.array(out["audio"]).astype(np.float32)
     sr = out["sampling_rate"]
 
     # Apply gender-based pitch shift
