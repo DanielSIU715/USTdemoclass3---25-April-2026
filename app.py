@@ -76,7 +76,7 @@ def get_tts_model():
     )
 
 # =========================
-# HELPERS
+# STORY HELPERS
 # =========================
 
 def img2text(image: Image.Image) -> str:
@@ -86,49 +86,22 @@ def img2text(image: Image.Image) -> str:
 
 def get_style_instruction(mode: str) -> str:
     style_map = {
-        "Fairy-tale": "Write the story as a magical fairy tale with wonder, charm, and a happy ending.",
-        "Adventure": "Write the story as a playful adventure with movement, discovery, and excitement.",
-        "Bedtime": "Write the story as a calm bedtime story that feels gentle, cozy, and peaceful.",
-        "Silly / Funny": "Write the story as a silly and funny story with playful humor for kids.",
-        "Superhero": "Write the story as a gentle superhero story with courage, kindness, and fun."
+        "Fairy-tale": "Write it as a magical fairy tale with wonder, charm, and a happy ending.",
+        "Adventure": "Write it as a playful adventure with discovery and excitement.",
+        "Bedtime": "Write it as a calm bedtime story with a peaceful and cozy feeling.",
+        "Silly / Funny": "Write it as a silly and funny story that may make kids laugh.",
+        "Superhero": "Write it as a gentle superhero story with courage, kindness, and fun."
     }
-    return style_map.get(mode, "Write the story in a cheerful children's style.")
+    return style_map.get(mode, "Write it as a cheerful children's story.")
 
 def get_voice_instruction(voice_style: str) -> str:
     voice_map = {
         "Friendly narrator": "Use a warm and friendly storytelling tone.",
-        "Soft bedtime voice": "Use a soft, calm, and gentle storytelling tone.",
+        "Soft bedtime voice": "Use a soft and gentle storytelling tone.",
         "Excited storyteller": "Use an energetic and lively storytelling tone.",
         "Cartoonish voice": "Use a playful and cartoon-like storytelling tone."
     }
     return voice_map.get(voice_style, "Use a cheerful storytelling tone.")
-
-def build_story_prompt(caption: str, mode: str, voice_style: str) -> str:
-    style_instruction = get_style_instruction(mode)
-    voice_instruction = get_voice_instruction(voice_style)
-    story_seed = random.randint(1000, 999999)
-
-    prompt = f"""
-Picture description: {caption}
-
-Write one brand new children's story in 50 to 100 words.
-
-Rules:
-- Use the important nouns, animals, objects, and actions from the picture description.
-- Keep the story clearly related to the picture description.
-- {style_instruction}
-- {voice_instruction}
-- Make the story cheerful, imaginative, and easy for kids to understand.
-- Use simple English.
-- Do not mention labels such as picture description, caption, prompt, instruction, or story mode.
-- Do not repeat sentences.
-- End with a warm or happy feeling.
-
-Story version: {story_seed}
-
-Story:
-"""
-    return prompt.strip()
 
 def remove_prompt_echo_sentences(sentences):
     banned_phrases = [
@@ -140,9 +113,11 @@ def remove_prompt_echo_sentences(sentences):
         "prompt",
         "instruction",
         "story version",
+        "rewrite version",
         "the story mode is",
-        "this is a",
-        "write one brand new"
+        "write one brand new",
+        "write a fresh",
+        "rules:"
     ]
 
     filtered = []
@@ -156,7 +131,6 @@ def remove_prompt_echo_sentences(sentences):
 def clean_story(text: str) -> str:
     text = text.replace("\n", " ").strip()
     raw_sentences = text.split(".")
-
     cleaned = []
     seen = set()
 
@@ -182,11 +156,12 @@ def clean_story(text: str) -> str:
 
     return story
 
-def generate_story_once(prompt: str) -> str:
+def generate_story_once(prompt: str, max_new_tokens: int = 180) -> str:
     model = get_story_model()
     output = model(
         prompt,
-        max_new_tokens=140,
+        max_new_tokens=max_new_tokens,
+        min_length=50,
         do_sample=True,
         temperature=0.95,
         top_p=0.95,
@@ -195,68 +170,121 @@ def generate_story_once(prompt: str) -> str:
     )
     return clean_story(output[0].get("generated_text", "").strip())
 
-def expand_story_if_needed(caption: str, mode: str, voice_style: str, story: str) -> str:
-    if len(story.split()) >= 50:
-        return story
+def build_main_story_prompt(caption: str, mode: str, voice_style: str) -> str:
+    style_instruction = get_style_instruction(mode)
+    voice_instruction = get_voice_instruction(voice_style)
+    story_seed = random.randint(1000, 999999)
 
+    prompt = f"""
+Picture description: {caption}
+
+Write one brand new children's story in 50 to 100 words.
+
+Requirements:
+- Use the main nouns, objects, animals, and actions from the picture description.
+- Keep the story clearly related to the picture description.
+- {style_instruction}
+- {voice_instruction}
+- Make it cheerful, imaginative, playful, and suitable for young kids.
+- Use simple English.
+- Do not repeat sentences.
+- Do not mention labels like picture description, caption, prompt, instruction, or story mode.
+- End with a happy or warm feeling.
+
+Story version: {story_seed}
+
+Story:
+"""
+    return prompt.strip()
+
+def build_expand_prompt(caption: str, mode: str, voice_style: str, short_story: str) -> str:
     rewrite_seed = random.randint(1000, 999999)
     style_instruction = get_style_instruction(mode)
     voice_instruction = get_voice_instruction(voice_style)
 
-    expand_prompt = f"""
+    prompt = f"""
+Picture description: {caption}
+
 Here is a short children's story:
-{story}
+{short_story}
 
-Rewrite it into a new story of 50 to 100 words.
+Rewrite and expand it into one complete children's story in 50 to 100 words.
 
-Rules:
-- Keep it clearly related to this picture description: {caption}
-- Keep the same overall style direction: {style_instruction}
+Requirements:
+- Keep it clearly related to the picture description.
+- Keep the same core meaning, but add more cheerful and imaginative details.
+- {style_instruction}
 - {voice_instruction}
-- Make it cheerful, imaginative, and suitable for kids.
-- Use simple English.
-- Do not mention prompts, labels, caption, or story mode.
+- Use simple English for kids.
 - Do not repeat sentences.
+- Do not mention prompts, labels, caption, or story mode.
+- End with a happy or warm feeling.
 
 Rewrite version: {rewrite_seed}
 
-Story:
+Improved story:
 """
-    expanded = generate_story_once(expand_prompt)
-    return expanded if expanded else story
+    return prompt.strip()
 
-def text2story(caption: str, mode: str, voice_style: str) -> str:
-    prompt = build_story_prompt(caption, mode, voice_style)
-    story = generate_story_once(prompt)
+def build_retry_prompt(caption: str, mode: str, voice_style: str) -> str:
+    retry_seed = random.randint(1000, 999999)
+    style_instruction = get_style_instruction(mode)
+    voice_instruction = get_voice_instruction(voice_style)
 
-    if len(story.split()) < 50:
-        story = expand_story_if_needed(caption, mode, voice_style, story)
-
-    if len(story.split()) < 50:
-        retry_prompt = f"""
+    prompt = f"""
 Picture description: {caption}
 
-Write a fresh children's story in 50 to 100 words.
-Use the picture description closely.
-{get_style_instruction(mode)}
-{get_voice_instruction(voice_style)}
-Make the story cheerful, imaginative, playful, and easy for kids.
-Use simple English.
-Do not mention labels, prompts, or story mode.
-Do not repeat sentences.
-End happily.
+Write a completely new children's story in 50 to 100 words.
+
+Requirements:
+- The story must be clearly based on the picture description.
+- Use the important nouns and actions from the picture description.
+- {style_instruction}
+- {voice_instruction}
+- Make it cheerful, imaginative, playful, and suitable for kids.
+- Use simple English.
+- Do not copy the picture description as a single sentence.
+- Do not repeat sentences.
+- Do not mention prompts, labels, caption, or story mode.
+- End happily.
+
+New story version: {retry_seed}
 
 Story:
 """
-        retry_story = generate_story_once(retry_prompt)
-        if retry_story:
-            story = retry_story
+    return prompt.strip()
+
+def text2story(caption: str, mode: str, voice_style: str) -> str:
+    story = generate_story_once(
+        build_main_story_prompt(caption, mode, voice_style),
+        max_new_tokens=180
+    )
+
+    if 50 <= len(story.split()) <= 100:
+        return story
+
+    story = generate_story_once(
+        build_expand_prompt(caption, mode, voice_style, story),
+        max_new_tokens=180
+    )
+
+    if 50 <= len(story.split()) <= 100:
+        return story
+
+    story = generate_story_once(
+        build_retry_prompt(caption, mode, voice_style),
+        max_new_tokens=180
+    )
 
     words = story.split()
     if len(words) > 100:
         story = " ".join(words[:100]).rstrip(".,;:! ") + "."
 
     return story
+
+# =========================
+# AUDIO HELPERS
+# =========================
 
 def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
     audio = np.asarray(audio, dtype=np.float32).squeeze()
