@@ -4,6 +4,7 @@ from PIL import Image
 import numpy as np
 import tempfile
 import wave
+import librosa
 
 # =========================
 # MAIN UI
@@ -112,20 +113,20 @@ def text2story(caption, mode):
     return story
 
 
-def generate_voice_audio(text, voice_style):
-    style_prefix = ""
-    if voice_style == "Friendly narrator":
-        style_prefix = "Read this in a warm, friendly storyteller voice: "
-    elif voice_style == "Soft bedtime voice":
-        style_prefix = "Read this in a calm, gentle bedtime voice: "
-    elif voice_style == "Excited storyteller":
-        style_prefix = "Read this in an excited, joyful storyteller voice: "
-    elif voice_style == "Cartoonish voice":
-        style_prefix = "Read this in a playful, cartoonish voice: "
-
+def generate_voice_audio(text, voice_style, gender):
+    # No prefix — clean audio
     tts = get_tts_model()
-    out = tts(style_prefix + text)
-    return out["audio"], out["sampling_rate"]
+    out = tts(text)
+    audio = out["audio"]
+    sr = out["sampling_rate"]
+
+    # Apply gender-based pitch shift
+    if gender == "Male":
+        audio = librosa.effects.pitch_shift(audio, sr, n_steps=-3)
+    elif gender == "Female":
+        audio = librosa.effects.pitch_shift(audio, sr, n_steps=3)
+
+    return audio, sr
 
 
 def save_audio(audio, sr):
@@ -163,6 +164,11 @@ voice_style = st.selectbox(
     ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"]
 )
 
+gender = st.selectbox(
+    "Choose voice gender",
+    ["Male", "Female"]
+)
+
 uploaded_image = st.file_uploader("Upload an image", type=["jpg", "jpeg", "png"])
 
 # =========================
@@ -185,8 +191,8 @@ if uploaded_image:
         st.write("### 📘 Your Story")
         st.write(story)
 
-        with st.spinner("Creating friendly voice..."):
-            voice_audio, sr = generate_voice_audio(story, voice_style)
+        with st.spinner("Creating voice audio..."):
+            voice_audio, sr = generate_voice_audio(story, voice_style, gender)
 
         audio_path = save_audio(voice_audio, sr)
         st.success("Audio ready!")
