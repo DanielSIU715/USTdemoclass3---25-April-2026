@@ -4,3 +4,6 @@ torch
 pillow
 numpy
 requests
+librosa
+numpy
+soundfile
