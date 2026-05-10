@@ -211,3 +211,4 @@ if uploaded_image:
         st.session_state.last_story = None
         st.session_state.last_audio_path = None
         st.experimental_rerun()
+
