@@ -77,7 +77,7 @@ def get_tts_model():
     )
 
 # =========================
-# IMAGE / STORY HELPERS
+# HELPERS
 # =========================
 
 def load_image_from_bytes(image_bytes: bytes) -> Image.Image:
@@ -118,10 +118,12 @@ def remove_prompt_echo_sentences(sentences):
         "instruction",
         "story version",
         "rewrite version",
+        "new story version",
         "the story mode is",
         "write one brand new",
         "write a fresh",
-        "rules:"
+        "rules:",
+        "requirements:"
     ]
 
     filtered = []
@@ -286,10 +288,6 @@ def text2story(caption: str, mode: str, voice_style: str) -> str:
 
     return story
 
-# =========================
-# AUDIO HELPERS
-# =========================
-
 def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
     audio = np.asarray(audio, dtype=np.float32).squeeze()
 
@@ -341,14 +339,6 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
 
     buffer.seek(0)
     return buffer.read()
-
-# =========================
-# RESET HELPERS
-# =========================
-
-def partial_reset_story_audio():
-    st.session_state.last_story = None
-    st.session_state.last_audio_bytes = None
 
 def full_reset_app():
     st.session_state.uploaded_image_bytes = None
@@ -422,12 +412,12 @@ if st.session_state.uploaded_image_bytes is not None:
     image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
     st.image(image, caption="Uploaded Image", use_container_width=True)
 
-    if st.session_state.last_caption is None:
-        with st.spinner("Generating caption..."):
-            st.session_state.last_caption = img2text(image)
-
     if st.button("Generate Story & Audio", type="primary"):
         try:
+            if not st.session_state.last_caption:
+                with st.spinner("Generating caption..."):
+                    st.session_state.last_caption = img2text(image)
+
             caption = st.session_state.last_caption
 
             with st.spinner("Writing cheerful story..."):
@@ -444,7 +434,7 @@ if st.session_state.uploaded_image_bytes is not None:
             st.error(f"Something went wrong: {e}")
 
 # =========================
-# PERSISTENT RESULTS
+# RESULTS
 # =========================
 
 if st.session_state.last_caption:
@@ -466,20 +456,8 @@ if st.session_state.last_audio_bytes:
         mime="audio/wav"
     )
 
-# =========================
-# RESET BUTTONS
-# =========================
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("Clear Story & Audio"):
-        partial_reset_story_audio()
-        st.rerun()
-
-with col2:
-    if st.button("Reset App"):
-        full_reset_app()
+if st.button("Reset App"):
+    full_reset_app()
 
 if st.session_state.uploaded_image_bytes is None:
     st.info("Please upload an image to begin.")
