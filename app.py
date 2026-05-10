@@ -30,10 +30,11 @@ st.write(
 # =========================
 
 defaults = {
+    "uploaded_image_bytes": None,
+    "uploaded_image_name": None,
     "last_caption": None,
     "last_story": None,
     "last_audio_bytes": None,
-    "last_uploaded_name": None,
     "reset_counter": 0,
 }
 
@@ -76,8 +77,11 @@ def get_tts_model():
     )
 
 # =========================
-# STORY HELPERS
+# IMAGE / STORY HELPERS
 # =========================
+
+def load_image_from_bytes(image_bytes: bytes) -> Image.Image:
+    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
 def img2text(image: Image.Image) -> str:
     model = get_img2text_model()
@@ -338,11 +342,20 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-def reset_app():
+# =========================
+# RESET HELPERS
+# =========================
+
+def partial_reset_story_audio():
+    st.session_state.last_story = None
+    st.session_state.last_audio_bytes = None
+
+def full_reset_app():
+    st.session_state.uploaded_image_bytes = None
+    st.session_state.uploaded_image_name = None
     st.session_state.last_caption = None
     st.session_state.last_story = None
     st.session_state.last_audio_bytes = None
-    st.session_state.last_uploaded_name = None
     st.session_state.reset_counter += 1
     st.rerun()
 
@@ -385,40 +398,47 @@ uploaded_image = st.file_uploader(
 )
 
 # =========================
-# IMAGE + GENERATION
+# STORE UPLOADED IMAGE
 # =========================
 
 if uploaded_image is not None:
-    if st.session_state.last_uploaded_name != uploaded_image.name:
+    uploaded_bytes = uploaded_image.getvalue()
+
+    if (
+        st.session_state.uploaded_image_name != uploaded_image.name
+        or st.session_state.uploaded_image_bytes != uploaded_bytes
+    ):
+        st.session_state.uploaded_image_bytes = uploaded_bytes
+        st.session_state.uploaded_image_name = uploaded_image.name
         st.session_state.last_caption = None
         st.session_state.last_story = None
         st.session_state.last_audio_bytes = None
-        st.session_state.last_uploaded_name = uploaded_image.name
 
-    image = Image.open(uploaded_image).convert("RGB")
+# =========================
+# DISPLAY IMAGE
+# =========================
+
+if st.session_state.uploaded_image_bytes is not None:
+    image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
     st.image(image, caption="Uploaded Image", use_container_width=True)
+
+    if st.session_state.last_caption is None:
+        with st.spinner("Generating caption..."):
+            st.session_state.last_caption = img2text(image)
 
     if st.button("Generate Story & Audio", type="primary"):
         try:
-            with st.spinner("Generating caption..."):
-                caption = img2text(image)
+            caption = st.session_state.last_caption
 
-            if not caption:
-                st.error("Could not generate a caption from the image.")
-            else:
-                with st.spinner("Writing cheerful story..."):
-                    story = text2story(caption, story_mode, voice_style)
+            with st.spinner("Writing cheerful story..."):
+                story = text2story(caption, story_mode, voice_style)
 
-                if not story:
-                    st.error("Could not generate a story.")
-                else:
-                    with st.spinner("Creating voice audio..."):
-                        voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
-                        audio_bytes = audio_to_wav_bytes(voice_audio, sr)
+            with st.spinner("Creating voice audio..."):
+                voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
+                audio_bytes = audio_to_wav_bytes(voice_audio, sr)
 
-                    st.session_state.last_caption = caption
-                    st.session_state.last_story = story
-                    st.session_state.last_audio_bytes = audio_bytes
+            st.session_state.last_story = story
+            st.session_state.last_audio_bytes = audio_bytes
 
         except Exception as e:
             st.error(f"Something went wrong: {e}")
@@ -446,8 +466,20 @@ if st.session_state.last_audio_bytes:
         mime="audio/wav"
     )
 
-if st.button("Reset App"):
-    reset_app()
+# =========================
+# RESET BUTTONS
+# =========================
 
-if uploaded_image is None:
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("Clear Story & Audio"):
+        partial_reset_story_audio()
+        st.rerun()
+
+with col2:
+    if st.button("Reset App"):
+        full_reset_app()
+
+if st.session_state.uploaded_image_bytes is None:
     st.info("Please upload an image to begin.")
