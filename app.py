@@ -25,6 +25,25 @@ st.write(
 )
 
 # =========================
+# SESSION STATE DEFAULTS
+# =========================
+
+defaults = {
+    "story_mode": "Fairy-tale",
+    "voice_style": "Friendly narrator",
+    "voice_tone": "Neutral",
+    "last_caption": None,
+    "last_story": None,
+    "last_audio_bytes": None,
+    "last_uploaded_name": None,
+    "uploader_key": 0,
+}
+
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
+
+# =========================
 # DEVICE
 # =========================
 
@@ -65,8 +84,7 @@ def get_tts_model():
 def img2text(image: Image.Image) -> str:
     model = get_img2text_model()
     output = model(image)
-    caption = output[0].get("generated_text", "").strip()
-    return caption
+    return output[0].get("generated_text", "").strip()
 
 def build_story_prompt(caption: str, mode: str, voice_style: str) -> str:
     style_map = {
@@ -148,18 +166,13 @@ def text2story(caption: str, mode: str, voice_style: str) -> str:
     story = output[0].get("generated_text", "").strip()
     return clean_story(story)
 
-def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, gender: str) -> np.ndarray:
+def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
     audio = np.asarray(audio, dtype=np.float32).squeeze()
 
     if audio.size == 0:
         raise ValueError("Generated audio is empty.")
 
     pitch_steps = 0
-
-    if gender == "Male":
-        pitch_steps -= 3
-    elif gender == "Female":
-        pitch_steps += 3
 
     if voice_style == "Soft bedtime voice":
         pitch_steps -= 1
@@ -168,13 +181,18 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, gender: st
     elif voice_style == "Cartoonish voice":
         pitch_steps += 2
 
+    if voice_tone == "Lower":
+        pitch_steps -= 2
+    elif voice_tone == "Higher":
+        pitch_steps += 2
+
     if pitch_steps != 0:
         audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=pitch_steps)
 
     audio = np.clip(audio, -1.0, 1.0)
     return audio
 
-def generate_voice_audio(text: str, voice_style: str, gender: str):
+def generate_voice_audio(text: str, voice_style: str, voice_tone: str):
     if not text.strip():
         raise ValueError("Story text is empty.")
 
@@ -187,7 +205,7 @@ def generate_voice_audio(text: str, voice_style: str, gender: str):
     audio = np.asarray(output["audio"], dtype=np.float32).squeeze()
     sr = int(output["sampling_rate"])
 
-    audio = apply_voice_effects(audio, sr, voice_style, gender)
+    audio = apply_voice_effects(audio, sr, voice_style, voice_tone)
     return audio, sr
 
 def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
@@ -204,20 +222,16 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-# =========================
-# SESSION STATE
-# =========================
-
-defaults = {
-    "last_caption": None,
-    "last_story": None,
-    "last_audio_bytes": None,
-    "last_uploaded_name": None,
-}
-
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
+def reset_app():
+    st.session_state.story_mode = "Fairy-tale"
+    st.session_state.voice_style = "Friendly narrator"
+    st.session_state.voice_tone = "Neutral"
+    st.session_state.last_caption = None
+    st.session_state.last_story = None
+    st.session_state.last_audio_bytes = None
+    st.session_state.last_uploaded_name = None
+    st.session_state.uploader_key += 1
+    st.rerun()
 
 # =========================
 # CONTROLS
@@ -225,22 +239,28 @@ for key, value in defaults.items():
 
 story_mode = st.selectbox(
     "Choose a story mode",
-    ["Fairy-tale", "Adventure", "Bedtime", "Silly / Funny", "Superhero"]
+    ["Fairy-tale", "Adventure", "Bedtime", "Silly / Funny", "Superhero"],
+    key="story_mode"
 )
 
 voice_style = st.selectbox(
     "Choose a voice style",
-    ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"]
+    ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"],
+    key="voice_style"
 )
 
-gender = st.selectbox(
-    "Choose voice gender",
-    ["Male", "Female"]
+voice_tone = st.selectbox(
+    "Choose a voice tone",
+    ["Neutral", "Lower", "Higher"],
+    key="voice_tone"
 )
+
+st.caption("Note: the voice tone changes the same base TTS voice slightly. It is not a true male/female speaker switch.")
 
 uploaded_image = st.file_uploader(
     "Upload an image",
-    type=["jpg", "jpeg", "png"]
+    type=["jpg", "jpeg", "png"],
+    key=f"uploader_{st.session_state.uploader_key}"
 )
 
 # =========================
@@ -279,7 +299,7 @@ if uploaded_image is not None:
                     st.write(story)
 
                     with st.spinner("Creating voice audio..."):
-                        voice_audio, sr = generate_voice_audio(story, voice_style, gender)
+                        voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
                         audio_bytes = audio_to_wav_bytes(voice_audio, sr)
 
                     st.success("Audio ready!")
@@ -299,19 +319,7 @@ if uploaded_image is not None:
         except Exception as e:
             st.error(f"Something went wrong: {e}")
 
-    if st.session_state.last_story and st.session_state.last_audio_bytes:
-        if st.button("🔁 Read Again"):
-            st.write("### 📘 Your Story")
-            if st.session_state.last_caption:
-                st.write(f"**Caption:** {st.session_state.last_caption}")
-            st.write(st.session_state.last_story)
-            st.audio(st.session_state.last_audio_bytes, format="audio/wav")
-
     if st.button("Reset App"):
-        st.session_state.last_caption = None
-        st.session_state.last_story = None
-        st.session_state.last_audio_bytes = None
-        st.session_state.last_uploaded_name = None
-        st.rerun()
+        reset_app()
 else:
     st.info("Please upload an image to begin.")
