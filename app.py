@@ -1,6 +1,6 @@
 import io
-import wave
 import random
+import wave
 
 import librosa
 import numpy as np
@@ -9,156 +9,171 @@ import torch
 from PIL import Image
 from transformers import pipeline
 
-# =========================
-# PAGE CONFIG
-# =========================
 
 APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
 
-st.set_page_config(
-    page_title=APP_TITLE,
-    page_icon="🐻",
-    layout="centered"
-)
 
-# =========================
-# KID-FRIENDLY BACKGROUND
-# =========================
+# ---------- Style ----------
 
-st.markdown("""
-<style>
-.stApp {
-    background:
-        radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0) 18%),
-        radial-gradient(circle at 85% 15%, rgba(255, 244, 189, 0.65) 0%, rgba(255, 244, 189, 0) 20%),
-        radial-gradient(circle at 20% 85%, rgba(255, 214, 232, 0.55) 0%, rgba(255, 214, 232, 0) 22%),
-        radial-gradient(circle at 80% 80%, rgba(189, 234, 255, 0.55) 0%, rgba(189, 234, 255, 0) 20%),
-        linear-gradient(180deg, #fff9e8 0%, #ffeef6 45%, #eef9ff 100%);
-    background-attachment: fixed;
-}
+def apply_custom_css():
+    st.markdown("""
+    <style>
+    .stApp {
+        background:
+            radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.70) 0%, rgba(255, 255, 255, 0) 18%),
+            radial-gradient(circle at 85% 15%, rgba(255, 244, 189, 0.65) 0%, rgba(255, 244, 189, 0) 20%),
+            radial-gradient(circle at 20% 85%, rgba(255, 214, 232, 0.55) 0%, rgba(255, 214, 232, 0) 22%),
+            radial-gradient(circle at 80% 80%, rgba(189, 234, 255, 0.55) 0%, rgba(189, 234, 255, 0) 20%),
+            linear-gradient(180deg, #fff9e8 0%, #ffeef6 45%, #eef9ff 100%);
+        background-attachment: fixed;
+    }
 
-.stApp > header {
-    background: rgba(255, 255, 255, 0);
-}
+    .stApp > header {
+        background: rgba(255, 255, 255, 0);
+    }
 
-.block-container {
-    padding-top: 2rem;
-    padding-bottom: 2rem;
-}
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
 
-div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stFileUploader"]) {
-    background: rgba(255, 255, 255, 0.55);
-    border: 1px solid rgba(255, 193, 214, 0.65);
-    border-radius: 22px;
-    padding: 1rem 1rem 1.2rem 1rem;
-    box-shadow: 0 10px 30px rgba(201, 157, 123, 0.10);
-}
+    div[data-testid="stVerticalBlock"] > div:has(> div[data-testid="stFileUploader"]) {
+        background: rgba(255, 255, 255, 0.55);
+        border: 1px solid rgba(255, 193, 214, 0.65);
+        border-radius: 22px;
+        padding: 1rem 1rem 1.2rem 1rem;
+        box-shadow: 0 10px 30px rgba(201, 157, 123, 0.10);
+    }
 
-div[data-testid="stButton"] > button {
-    border-radius: 999px;
-    border: none;
-    background: linear-gradient(135deg, #ff8fab 0%, #ff758f 100%);
-    color: white;
-    font-weight: 700;
-    padding: 0.65rem 1.2rem;
-    box-shadow: 0 8px 18px rgba(255, 117, 143, 0.25);
-}
+    div[data-testid="stButton"] > button {
+        border-radius: 999px;
+        border: none;
+        background: linear-gradient(135deg, #ff8fab 0%, #ff758f 100%);
+        color: white;
+        font-weight: 700;
+        padding: 0.65rem 1.2rem;
+        box-shadow: 0 8px 18px rgba(255, 117, 143, 0.25);
+    }
 
-div[data-testid="stButton"] > button:hover {
-    background: linear-gradient(135deg, #ff7998 0%, #ff5c7c 100%);
-    color: white;
-}
+    div[data-testid="stButton"] > button:hover {
+        background: linear-gradient(135deg, #ff7998 0%, #ff5c7c 100%);
+        color: white;
+    }
 
-div[data-testid="stDownloadButton"] > button {
-    border-radius: 999px;
-    border: none;
-    background: linear-gradient(135deg, #7cc7ff 0%, #5caeff 100%);
-    color: white;
-    font-weight: 700;
-    padding: 0.65rem 1.2rem;
-    box-shadow: 0 8px 18px rgba(92, 174, 255, 0.25);
-}
+    div[data-testid="stDownloadButton"] > button {
+        border-radius: 999px;
+        border: none;
+        background: linear-gradient(135deg, #7cc7ff 0%, #5caeff 100%);
+        color: white;
+        font-weight: 700;
+        padding: 0.65rem 1.2rem;
+        box-shadow: 0 8px 18px rgba(92, 174, 255, 0.25);
+    }
 
-div[data-testid="stDownloadButton"] > button:hover {
-    background: linear-gradient(135deg, #64baff 0%, #439eff 100%);
-    color: white;
-}
+    div[data-testid="stDownloadButton"] > button:hover {
+        background: linear-gradient(135deg, #64baff 0%, #439eff 100%);
+        color: white;
+    }
 
-div[data-testid="stSuccess"] {
-    border-radius: 18px;
-}
+    div[data-testid="stSuccess"],
+    div[data-testid="stAlert"] {
+        border-radius: 18px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-div[data-testid="stAlert"] {
-    border-radius: 18px;
-}
-</style>
-""", unsafe_allow_html=True)
 
-# =========================
-# SESSION STATE DEFAULTS
-# =========================
+# ---------- State ----------
 
-defaults = {
-    "entry_confirmed": None,
-    "uploaded_image_bytes": None,
-    "uploaded_image_name": None,
-    "last_caption": None,
-    "last_story": None,
-    "last_audio_bytes": None,
-    "reset_counter": 0,
-}
+def init_state():
+    defaults = {
+        "entry_confirmed": None,
+        "uploaded_image_bytes": None,
+        "uploaded_image_name": None,
+        "last_caption": None,
+        "last_story": None,
+        "last_audio_bytes": None,
+        "reset_counter": 0,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-for key, value in defaults.items():
-    if key not in st.session_state:
-        st.session_state[key] = value
 
-# =========================
-# DEVICE
-# =========================
+def reset_for_another_story():
+    st.session_state.uploaded_image_bytes = None
+    st.session_state.uploaded_image_name = None
+    st.session_state.last_caption = None
+    st.session_state.last_story = None
+    st.session_state.last_audio_bytes = None
+    st.session_state.reset_counter += 1
+    st.rerun()
 
-DEVICE = 0 if torch.cuda.is_available() else -1
 
-# =========================
-# HUGGING FACE MODELS
-# =========================
+# ---------- Models ----------
 
 @st.cache_resource
 def get_img2text_model():
+    device = 0 if torch.cuda.is_available() else -1
     return pipeline(
         "image-to-text",
         model="Salesforce/blip-image-captioning-base",
-        device=DEVICE
+        device=device
     )
+
 
 @st.cache_resource
 def get_story_model():
+    device = 0 if torch.cuda.is_available() else -1
     return pipeline(
         "text2text-generation",
         model="google/flan-t5-base",
-        device=DEVICE
+        device=device
     )
+
 
 @st.cache_resource
 def get_tts_model():
+    device = 0 if torch.cuda.is_available() else -1
     return pipeline(
         "text-to-speech",
         model="facebook/mms-tts-eng",
-        device=DEVICE
+        device=device
     )
 
-# =========================
-# HELPERS
-# =========================
 
-def load_image_from_bytes(image_bytes: bytes) -> Image.Image:
+# ---------- Image ----------
+
+def load_image_from_bytes(image_bytes):
     return Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-def img2text(image: Image.Image) -> str:
+
+def save_uploaded_image(uploaded_image):
+    if uploaded_image is None:
+        return
+
+    uploaded_bytes = uploaded_image.getvalue()
+
+    if (
+        st.session_state.uploaded_image_name != uploaded_image.name
+        or st.session_state.uploaded_image_bytes != uploaded_bytes
+    ):
+        st.session_state.uploaded_image_bytes = uploaded_bytes
+        st.session_state.uploaded_image_name = uploaded_image.name
+        st.session_state.last_caption = None
+        st.session_state.last_story = None
+        st.session_state.last_audio_bytes = None
+
+
+def image_to_caption(image):
     model = get_img2text_model()
     output = model(image)
     return output[0].get("generated_text", "").strip()
 
-def get_style_instruction(mode: str) -> str:
+
+# ---------- Story ----------
+
+def get_style_instruction(mode):
     style_map = {
         "Fairy-tale": "Write it as a magical fairy tale with wonder, charm, and a happy ending.",
         "Adventure": "Write it as a playful adventure with discovery and excitement.",
@@ -168,7 +183,8 @@ def get_style_instruction(mode: str) -> str:
     }
     return style_map.get(mode, "Write it as a cheerful children's story.")
 
-def get_voice_instruction(voice_style: str) -> str:
+
+def get_voice_instruction(voice_style):
     voice_map = {
         "Friendly narrator": "Use a warm and friendly storytelling tone.",
         "Soft bedtime voice": "Use a soft and gentle storytelling tone.",
@@ -177,34 +193,15 @@ def get_voice_instruction(voice_style: str) -> str:
     }
     return voice_map.get(voice_style, "Use a cheerful storytelling tone.")
 
-def remove_prompt_echo_sentences(sentences):
+
+def clean_story(text):
     banned_phrases = [
-        "story mode",
-        "selected mode",
-        "picture description",
-        "image caption",
-        "caption:",
-        "prompt",
-        "instruction",
-        "story version",
-        "rewrite version",
-        "new story version",
-        "the story mode is",
-        "write one brand new",
-        "write a fresh",
-        "rules:",
-        "requirements:"
+        "story mode", "selected mode", "picture description", "image caption",
+        "caption:", "prompt", "instruction", "story version", "rewrite version",
+        "new story version", "the story mode is", "write one brand new",
+        "write a fresh", "rules:", "requirements:"
     ]
 
-    filtered = []
-    for sentence in sentences:
-        s = sentence.strip()
-        low = s.lower()
-        if s and not any(phrase in low for phrase in banned_phrases):
-            filtered.append(s)
-    return filtered
-
-def clean_story(text: str) -> str:
     text = text.replace("\n", " ").strip()
     raw_sentences = text.split(".")
     cleaned = []
@@ -212,18 +209,21 @@ def clean_story(text: str) -> str:
 
     for sentence in raw_sentences:
         sentence = " ".join(sentence.strip().split())
-        normalized = sentence.lower()
-        if sentence and normalized not in seen:
-            cleaned.append(sentence)
-            seen.add(normalized)
+        lower_sentence = sentence.lower()
 
-    cleaned = remove_prompt_echo_sentences(cleaned)
+        if not sentence:
+            continue
+        if any(phrase in lower_sentence for phrase in banned_phrases):
+            continue
+        if lower_sentence in seen:
+            continue
 
-    if not cleaned:
-        return ""
+        cleaned.append(sentence)
+        seen.add(lower_sentence)
 
     story = ". ".join(cleaned).strip()
-    if not story.endswith("."):
+
+    if story and not story.endswith("."):
         story += "."
 
     words = story.split()
@@ -232,7 +232,8 @@ def clean_story(text: str) -> str:
 
     return story
 
-def generate_story_once(prompt: str, max_new_tokens: int = 180) -> str:
+
+def generate_story_once(prompt, max_new_tokens=180):
     model = get_story_model()
     output = model(
         prompt,
@@ -246,12 +247,10 @@ def generate_story_once(prompt: str, max_new_tokens: int = 180) -> str:
     )
     return clean_story(output[0].get("generated_text", "").strip())
 
-def build_main_story_prompt(caption: str, mode: str, voice_style: str) -> str:
-    style_instruction = get_style_instruction(mode)
-    voice_instruction = get_voice_instruction(voice_style)
-    story_seed = random.randint(1000, 999999)
 
-    prompt = f"""
+def build_main_story_prompt(caption, mode, voice_style):
+    story_seed = random.randint(1000, 999999)
+    return f"""
 Picture description: {caption}
 
 Write one brand new children's story in 50 to 100 words.
@@ -259,8 +258,8 @@ Write one brand new children's story in 50 to 100 words.
 Requirements:
 - Use the main nouns, objects, animals, and actions from the picture description.
 - Keep the story clearly related to the picture description.
-- {style_instruction}
-- {voice_instruction}
+- {get_style_instruction(mode)}
+- {get_voice_instruction(voice_style)}
 - Make it cheerful, imaginative, playful, and suitable for young kids.
 - Use simple English.
 - Do not repeat sentences.
@@ -270,15 +269,12 @@ Requirements:
 Story version: {story_seed}
 
 Story:
-"""
-    return prompt.strip()
+""".strip()
 
-def build_expand_prompt(caption: str, mode: str, voice_style: str, short_story: str) -> str:
+
+def build_expand_prompt(caption, mode, voice_style, short_story):
     rewrite_seed = random.randint(1000, 999999)
-    style_instruction = get_style_instruction(mode)
-    voice_instruction = get_voice_instruction(voice_style)
-
-    prompt = f"""
+    return f"""
 Picture description: {caption}
 
 Here is a short children's story:
@@ -289,8 +285,8 @@ Rewrite and expand it into one complete children's story in 50 to 100 words.
 Requirements:
 - Keep it clearly related to the picture description.
 - Keep the same core meaning, but add more cheerful and imaginative details.
-- {style_instruction}
-- {voice_instruction}
+- {get_style_instruction(mode)}
+- {get_voice_instruction(voice_style)}
 - Use simple English for kids.
 - Do not repeat sentences.
 - Do not mention prompts, labels, caption, or story mode.
@@ -299,15 +295,12 @@ Requirements:
 Rewrite version: {rewrite_seed}
 
 Improved story:
-"""
-    return prompt.strip()
+""".strip()
 
-def build_retry_prompt(caption: str, mode: str, voice_style: str) -> str:
+
+def build_retry_prompt(caption, mode, voice_style):
     retry_seed = random.randint(1000, 999999)
-    style_instruction = get_style_instruction(mode)
-    voice_instruction = get_voice_instruction(voice_style)
-
-    prompt = f"""
+    return f"""
 Picture description: {caption}
 
 Write a completely new children's story in 50 to 100 words.
@@ -315,8 +308,8 @@ Write a completely new children's story in 50 to 100 words.
 Requirements:
 - The story must be clearly based on the picture description.
 - Use the important nouns and actions from the picture description.
-- {style_instruction}
-- {voice_instruction}
+- {get_style_instruction(mode)}
+- {get_voice_instruction(voice_style)}
 - Make it cheerful, imaginative, playful, and suitable for kids.
 - Use simple English.
 - Do not copy the picture description as a single sentence.
@@ -327,30 +320,21 @@ Requirements:
 New story version: {retry_seed}
 
 Story:
-"""
-    return prompt.strip()
+""".strip()
 
-def text2story(caption: str, mode: str, voice_style: str) -> str:
-    story = generate_story_once(
-        build_main_story_prompt(caption, mode, voice_style),
-        max_new_tokens=180
-    )
+
+def caption_to_story(caption, mode, voice_style):
+    story = generate_story_once(build_main_story_prompt(caption, mode, voice_style))
 
     if 50 <= len(story.split()) <= 100:
         return story
 
-    story = generate_story_once(
-        build_expand_prompt(caption, mode, voice_style, story),
-        max_new_tokens=180
-    )
+    story = generate_story_once(build_expand_prompt(caption, mode, voice_style, story))
 
     if 50 <= len(story.split()) <= 100:
         return story
 
-    story = generate_story_once(
-        build_retry_prompt(caption, mode, voice_style),
-        max_new_tokens=180
-    )
+    story = generate_story_once(build_retry_prompt(caption, mode, voice_style))
 
     words = story.split()
     if len(words) > 100:
@@ -358,7 +342,10 @@ def text2story(caption: str, mode: str, voice_style: str) -> str:
 
     return story
 
-def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone: str) -> np.ndarray:
+
+# ---------- Audio ----------
+
+def apply_voice_effects(audio, sr, voice_style, voice_tone):
     audio = np.asarray(audio, dtype=np.float32).squeeze()
 
     if audio.size == 0:
@@ -383,7 +370,8 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone
 
     return np.clip(audio, -1.0, 1.0)
 
-def generate_voice_audio(text: str, voice_style: str, voice_tone: str):
+
+def text_to_audio(text, voice_style, voice_tone):
     tts = get_tts_model()
     output = tts(text)
 
@@ -392,11 +380,12 @@ def generate_voice_audio(text: str, voice_style: str, voice_tone: str):
 
     audio = np.asarray(output["audio"], dtype=np.float32).squeeze()
     sr = int(output["sampling_rate"])
-
     audio = apply_voice_effects(audio, sr, voice_style, voice_tone)
+
     return audio, sr
 
-def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
+
+def audio_to_wav_bytes(audio, sr):
     audio = np.clip(audio, -1.0, 1.0)
     audio_int16 = (audio * 32767).astype(np.int16)
 
@@ -410,48 +399,90 @@ def audio_to_wav_bytes(audio: np.ndarray, sr: int) -> bytes:
     buffer.seek(0)
     return buffer.read()
 
-def reset_for_another_story():
-    st.session_state.uploaded_image_bytes = None
-    st.session_state.uploaded_image_name = None
-    st.session_state.last_caption = None
-    st.session_state.last_story = None
-    st.session_state.last_audio_bytes = None
-    st.session_state.reset_counter += 1
-    st.rerun()
 
-# =========================
-# ENTRY GATE
-# =========================
+# ---------- UI ----------
 
-if st.session_state.entry_confirmed is None:
-    st.title("🐻 Welcome, Little Bear 🐾")
-    st.warning(
-        "This website only generates stories for children under 18. "
-        "Do you understand and wish to enter?"
-    )
+def show_entry_gate():
+    if st.session_state.entry_confirmed is None:
+        st.title("🐻 Welcome, Little Bear 🐾")
+        st.warning(
+            "This website only generates stories for children under 18. "
+            "Do you understand and wish to enter?"
+        )
 
-    col1, col2 = st.columns(2)
+        col1, col2 = st.columns(2)
 
-    with col1:
-        if st.button("Yes"):
-            st.session_state.entry_confirmed = True
-            st.rerun()
+        with col1:
+            if st.button("Yes"):
+                st.session_state.entry_confirmed = True
+                st.rerun()
 
-    with col2:
-        if st.button("No"):
-            st.session_state.entry_confirmed = False
-            st.rerun()
+        with col2:
+            if st.button("No"):
+                st.session_state.entry_confirmed = False
+                st.rerun()
 
-    st.stop()
+        st.stop()
 
-if st.session_state.entry_confirmed is False:
-    st.title("🐻 Access Notice")
-    st.error("Please leave this website.")
-    st.stop()
+    if st.session_state.entry_confirmed is False:
+        st.title("🐻 Access Notice")
+        st.error("Please leave this website.")
+        st.stop()
 
-# =========================
-# MAIN APP
-# =========================
+
+def show_results():
+    if st.session_state.last_caption:
+        st.success("🐻 Parent bears vote a theme of a story!")
+        st.write(f"**Story theme:** {st.session_state.last_caption}")
+
+    if st.session_state.last_story:
+        st.markdown("### 🐻 Parent bears are telling story now....")
+        st.write(st.session_state.last_story)
+
+    if st.session_state.last_audio_bytes:
+        st.success("🐻 Voice of the roarrrrr !")
+        st.audio(st.session_state.last_audio_bytes, format="audio/wav")
+        st.download_button(
+            "🐻 Download the voice of bear",
+            data=st.session_state.last_audio_bytes,
+            file_name="kids_story.wav",
+            mime="audio/wav"
+        )
+
+    if st.session_state.last_story or st.session_state.last_audio_bytes:
+        if st.button("🐻 Discuss with bears for another story with a new image!"):
+            reset_for_another_story()
+
+
+def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
+    if not st.session_state.last_caption:
+        with st.spinner("📸 A tiny owl is peeking at your picture..."):
+            st.session_state.last_caption = image_to_caption(image)
+
+    caption = st.session_state.last_caption
+
+    with st.spinner("🍰 Your story is in the oven!"):
+        story = caption_to_story(caption, story_mode, voice_style)
+
+    with st.spinner("🐻 Some little bears are tasting your story!"):
+        voice_audio, sr = text_to_audio(story, voice_style, voice_tone)
+        audio_bytes = audio_to_wav_bytes(voice_audio, sr)
+
+    st.session_state.last_story = story
+    st.session_state.last_audio_bytes = audio_bytes
+
+
+# ---------- Main ----------
+
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon="🐻",
+    layout="centered"
+)
+
+apply_custom_css()
+init_state()
+show_entry_gate()
 
 st.title(APP_TITLE)
 st.write(
@@ -487,18 +518,7 @@ uploaded_image = st.file_uploader(
     key=f"uploader_{suffix}"
 )
 
-if uploaded_image is not None:
-    uploaded_bytes = uploaded_image.getvalue()
-
-    if (
-        st.session_state.uploaded_image_name != uploaded_image.name
-        or st.session_state.uploaded_image_bytes != uploaded_bytes
-    ):
-        st.session_state.uploaded_image_bytes = uploaded_bytes
-        st.session_state.uploaded_image_name = uploaded_image.name
-        st.session_state.last_caption = None
-        st.session_state.last_story = None
-        st.session_state.last_audio_bytes = None
+save_uploaded_image(uploaded_image)
 
 if st.session_state.uploaded_image_bytes is not None:
     image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
@@ -506,46 +526,11 @@ if st.session_state.uploaded_image_bytes is not None:
 
     if st.button("🐻 Discuss with parent bears for a story", type="primary"):
         try:
-            if not st.session_state.last_caption:
-                with st.spinner("📸 A tiny owl is peeking at your picture..."):
-                    st.session_state.last_caption = img2text(image)
-
-            caption = st.session_state.last_caption
-
-            with st.spinner("🍰 Your story is in the oven!"):
-                story = text2story(caption, story_mode, voice_style)
-
-            with st.spinner("🐻 Some little bears are tasting your story!"):
-                voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
-                audio_bytes = audio_to_wav_bytes(voice_audio, sr)
-
-            st.session_state.last_story = story
-            st.session_state.last_audio_bytes = audio_bytes
-
+            generate_story_and_audio(image, story_mode, voice_style, voice_tone)
         except Exception as e:
             st.error(f"Something went wrong: {e}")
 
-if st.session_state.last_caption:
-    st.success("🐻 Parent bears vote a theme of a story!")
-    st.write(f"**Story theme:** {st.session_state.last_caption}")
-
-if st.session_state.last_story:
-    st.markdown("### 🐻 Parent bears are telling story now....")
-    st.write(st.session_state.last_story)
-
-if st.session_state.last_audio_bytes:
-    st.success("🐻 Voice of the roarrrrr !")
-    st.audio(st.session_state.last_audio_bytes, format="audio/wav")
-    st.download_button(
-        "🐻 Download the voice of bear",
-        data=st.session_state.last_audio_bytes,
-        file_name="kids_story.wav",
-        mime="audio/wav"
-    )
-
-if st.session_state.last_story or st.session_state.last_audio_bytes:
-    if st.button("🐻 Discuss with bears for another story with a new image!"):
-        reset_for_another_story()
+show_results()
 
 if st.session_state.uploaded_image_bytes is None:
     st.info("Please upload an image to begin.")
