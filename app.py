@@ -13,9 +13,11 @@ from transformers import pipeline
 # PAGE CONFIG
 # =========================
 
+APP_TITLE = "Parent Bears are telling stories right now! Let's join with other little bears!"
+
 st.set_page_config(
-    page_title="Cheerful Kids' Image Storytelling App",
-    page_icon="📖",
+    page_title=APP_TITLE,
+    page_icon="🐻",
     layout="centered"
 )
 
@@ -298,10 +300,11 @@ def apply_voice_effects(audio: np.ndarray, sr: int, voice_style: str, voice_tone
     elif voice_style == "Cartoonish voice":
         pitch_steps += 2
 
-    if voice_tone == "Lower":
+    if voice_tone == "Old Bear":
         pitch_steps -= 2
-    elif voice_tone == "Higher":
+    elif voice_tone == "Teenage Bear":
         pitch_steps += 2
+    # Adult Bear = no extra change
 
     if pitch_steps != 0:
         audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=pitch_steps)
@@ -350,10 +353,10 @@ def full_reset_app():
 # =========================
 
 if st.session_state.entry_confirmed is None:
-    st.title("📖 Welcome")
+    st.title("🐻 Welcome, Little Bear")
     st.warning(
         "This website only generates stories for children under 18. "
-        "Do you confirm that you understand this before entering?"
+        "Do you understand and wish to enter?"
     )
 
     col1, col2 = st.columns(2)
@@ -371,7 +374,7 @@ if st.session_state.entry_confirmed is None:
     st.stop()
 
 if st.session_state.entry_confirmed is False:
-    st.title("Access Notice")
+    st.title("🐻 Access Notice")
     st.error("Please leave this website.")
     st.stop()
 
@@ -379,10 +382,9 @@ if st.session_state.entry_confirmed is False:
 # MAIN APP
 # =========================
 
-st.title("📖 Cheerful Kids' Image Storytelling App")
+st.title(APP_TITLE)
 st.write(
-    "Upload an image, generate a caption, create a cheerful children's story, "
-    "and listen to it as audio."
+    "Upload an image, let the parent bears look at it, and enjoy a story and audio made for little bears."
 )
 
 suffix = str(st.session_state.reset_counter)
@@ -402,15 +404,14 @@ voice_style = st.selectbox(
 )
 
 voice_tone = st.selectbox(
-    "Choose a voice tone",
-    ["Neutral", "Lower", "Higher"],
+    "Choose a bear voice",
+    ["Adult Bear", "Old Bear", "Teenage Bear"],
     index=0,
     key=f"voice_tone_{suffix}"
 )
 
 st.caption(
-    "Note: the voice tone changes the same base Hugging Face TTS voice slightly. "
-    "It is not a true male/female speaker switch."
+    "Note: Adult Bear, Old Bear, and Teenage Bear are playful labels for different pitch effects on the same base Hugging Face TTS voice."
 )
 
 uploaded_image = st.file_uploader(
@@ -439,15 +440,15 @@ if st.session_state.uploaded_image_bytes is not None:
     if st.button("Generate Story & Audio", type="primary"):
         try:
             if not st.session_state.last_caption:
-                with st.spinner("Generating caption..."):
+                with st.spinner("📸 A tiny owl is peeking at your picture..."):
                     st.session_state.last_caption = img2text(image)
 
             caption = st.session_state.last_caption
 
-            with st.spinner("Writing cheerful story..."):
+            with st.spinner("🍰 Your story is in the oven!"):
                 story = text2story(caption, story_mode, voice_style)
 
-            with st.spinner("Creating voice audio..."):
+            with st.spinner("🐻 Some little bears are tasting your story!"):
                 voice_audio, sr = generate_voice_audio(story, voice_style, voice_tone)
                 audio_bytes = audio_to_wav_bytes(voice_audio, sr)
 
