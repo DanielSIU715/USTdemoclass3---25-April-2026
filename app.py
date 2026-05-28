@@ -236,6 +236,25 @@ def add_score_to_user(username, score, animal_name):
     save_score_data(data)
 
 
+def reset_user_score(username):
+    """Reset the selected user's total score, history, and all animal subtotals back to zero."""
+    data = load_score_data()
+
+    if username not in data:
+        data[username] = {
+            "password": DEFAULT_PASSWORD,
+            "total_score": 0,
+            "score_history": [],
+            "animal_scores": default_animal_scores(),
+        }
+    else:
+        data[username]["total_score"] = 0
+        data[username]["score_history"] = []
+        data[username]["animal_scores"] = default_animal_scores()
+
+    save_score_data(data)
+
+
 # ---------- Session state functions ----------
 
 def init_state():
@@ -1120,6 +1139,28 @@ def show_login_page():
     st.stop()
 
 
+@st.dialog("Reset score confirmation")
+def show_reset_score_dialog():
+    """Ask the user to confirm score reset before clearing all totals."""
+    st.warning("Are you sure you want to reset all total and subtotal scores to zero?")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Yes, reset all scores", key="confirm_reset_scores"):
+            reset_user_score(st.session_state.current_user)
+            st.session_state.kid_score = None
+            st.session_state.kid_score_message = None
+            st.session_state.score_saved_for_current_story = False
+            st.session_state.last_score_animal = None
+            st.success("All scores have been reset to zero.")
+            st.rerun()
+
+    with col2:
+        if st.button("Cancel", key="cancel_reset_scores"):
+            st.rerun()
+
+
 def show_sidebar_user_panel():
     """Show the logged-in user profile, total animals, and animal subtotals in the sidebar."""
     if not st.session_state.logged_in:
@@ -1138,7 +1179,12 @@ def show_sidebar_user_panel():
         subtotal = int(animal_scores.get(animal, 0))
         st.sidebar.write(f"{meta['icon']} {animal}: {subtotal}")
 
-    if st.sidebar.button("Log out"):
+    st.sidebar.markdown("---")
+
+    if st.sidebar.button("Reset score", use_container_width=True):
+        show_reset_score_dialog()
+
+    if st.sidebar.button("Log out", use_container_width=True):
         logout_and_return_to_warning()
 
 
