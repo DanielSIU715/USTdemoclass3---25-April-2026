@@ -874,16 +874,12 @@ def show_results():
 
 
 def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
-    if not st.session_state.last_caption:
-        with st.spinner("📸 A tiny owl is peeking at your picture..."):
-            base_caption, face_summary, enriched_caption, emotion_words, child_context = image_to_caption_with_expression(image)
-            st.session_state.last_base_caption = base_caption
-            st.session_state.last_face_summary = face_summary
-            st.session_state.last_caption = enriched_caption
-            st.session_state.last_emotion_words = emotion_words
-    else:
-        emotion_words = st.session_state.get("last_emotion_words", "")
-        child_context = build_child_context()
+    with st.spinner("📸 A tiny owl is peeking at your picture..."):
+        base_caption, face_summary, enriched_caption, emotion_words, child_context = image_to_caption_with_expression(image)
+        st.session_state.last_base_caption = base_caption
+        st.session_state.last_face_summary = face_summary
+        st.session_state.last_caption = enriched_caption
+        st.session_state.last_emotion_words = emotion_words
 
     caption = st.session_state.last_caption
 
