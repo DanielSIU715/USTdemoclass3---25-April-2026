@@ -1,13 +1,16 @@
 import io
 import random
+import re
 import wave
+from collections import Counter
 
+import cv2
 import librosa
 import numpy as np
 import streamlit as st
 import torch
 from PIL import Image
-from transformers import pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
@@ -76,7 +79,8 @@ def apply_custom_css():
     }
 
     div[data-testid="stSuccess"],
-    div[data-testid="stAlert"] {
+    div[data-testid="stAlert"],
+    div[data-testid="stInfo"] {
         border-radius: 18px;
     }
     </style>
@@ -91,6 +95,8 @@ def init_state():
         "uploaded_image_bytes": None,
         "uploaded_image_name": None,
         "last_caption": None,
+        "last_base_caption": None,
+        "last_face_summary": None,
         "last_story": None,
         "last_audio_bytes": None,
         "reset_counter": 0,
@@ -104,42 +110,85 @@ def reset_for_another_story():
     st.session_state.uploaded_image_bytes = None
     st.session_state.uploaded_image_name = None
     st.session_state.last_caption = None
+    st.session_state.last_base_caption = None
+    st.session_state.last_face_summary = None
     st.session_state.last_story = None
     st.session_state.last_audio_bytes = None
     st.session_state.reset_counter += 1
     st.rerun()
 
 
+# ---------- Device helpers ----------
+
+def get_device():
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def get_pipeline_device():
+    return 0 if torch.cuda.is_available() else -1
+
+
 # ---------- Models ----------
 
 @st.cache_resource
 def get_img2text_model():
-    device = 0 if torch.cuda.is_available() else -1
     return pipeline(
         "image-to-text",
         model="Salesforce/blip-image-captioning-base",
-        device=device
+        device=get_pipeline_device()
     )
 
 
 @st.cache_resource
-def get_story_model():
-    device = 0 if torch.cuda.is_available() else -1
+def get_expression_model():
     return pipeline(
-        "text2text-generation",
-        model="google/flan-t5-base",
-        device=device
+        "image-classification",
+        model="mo-thecreator/vit-Facial-Expression-Recognition",
+        device=get_pipeline_device()
     )
 
 
 @st.cache_resource
 def get_tts_model():
-    device = 0 if torch.cuda.is_available() else -1
     return pipeline(
         "text-to-speech",
         model="facebook/mms-tts-eng",
-        device=device
+        device=get_pipeline_device()
     )
+
+
+@st.cache_resource
+def get_story_components():
+    model_name = "gpt2-medium"
+    device = get_device()
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model_kwargs = {
+        "low_cpu_mem_usage": True
+    }
+
+    if device == "cuda":
+        model_kwargs["torch_dtype"] = torch.float16
+        model_kwargs["device_map"] = "auto"
+    else:
+        model_kwargs["torch_dtype"] = torch.float32
+
+    model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+    model.eval()
+
+    return tokenizer, model
+
+
+@st.cache_resource
+def get_face_detector():
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    detector = cv2.CascadeClassifier(cascade_path)
+    if detector.empty():
+        raise ValueError("Failed to load OpenCV Haar cascade for face detection.")
+    return detector
 
 
 # ---------- Image ----------
@@ -161,14 +210,150 @@ def save_uploaded_image(uploaded_image):
         st.session_state.uploaded_image_bytes = uploaded_bytes
         st.session_state.uploaded_image_name = uploaded_image.name
         st.session_state.last_caption = None
+        st.session_state.last_base_caption = None
+        st.session_state.last_face_summary = None
         st.session_state.last_story = None
         st.session_state.last_audio_bytes = None
+
+
+def pil_to_cv2(image):
+    rgb = np.array(image)
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def detect_faces(image):
+    detector = get_face_detector()
+    cv_img = pil_to_cv2(image)
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(40, 40)
+    )
+
+    return faces
+
+
+def crop_faces(image, faces):
+    rgb = np.array(image)
+    crops = []
+
+    for (x, y, w, h) in faces:
+        face_crop = rgb[y:y+h, x:x+w]
+        if face_crop.size == 0:
+            continue
+        crops.append(Image.fromarray(face_crop))
+    return crops
+
+
+def normalize_expression_label(label):
+    label = str(label).strip().lower()
+    mapping = {
+        "happiness": "happy",
+        "happy": "happy",
+        "neutral": "neutral",
+        "sadness": "sad",
+        "sad": "sad",
+        "anger": "angry",
+        "angry": "angry",
+        "surprise": "surprised",
+        "fear": "fearful",
+        "disgust": "disgusted"
+    }
+    return mapping.get(label, label)
+
+
+def detect_facial_expressions(face_crops):
+    if not face_crops:
+        return []
+
+    expr_model = get_expression_model()
+    expressions = []
+
+    for crop in face_crops:
+        try:
+            preds = expr_model(crop)
+            if preds:
+                top_label = preds[0]["label"]
+                expressions.append(normalize_expression_label(top_label))
+        except Exception:
+            continue
+
+    return expressions
+
+
+def build_face_expression_summary(faces, expressions):
+    face_count = len(faces)
+
+    if face_count == 0:
+        return ""
+
+    if not expressions:
+        return f"{face_count} face(s) detected, but the expressions were not clear enough to identify."
+
+    counts = Counter(expressions)
+    parts = [f"{emotion} ({count})" for emotion, count in counts.most_common()]
+    joined = ", ".join(parts)
+
+    if face_count == 1:
+        return f"1 face detected. The expression appears {expressions[0]}."
+    return f"{face_count} faces detected. The expressions appear to be: {joined}."
 
 
 def image_to_caption(image):
     model = get_img2text_model()
     output = model(image)
     return output[0].get("generated_text", "").strip()
+
+
+def image_to_caption_with_expression(image):
+    base_caption = image_to_caption(image)
+    faces = detect_faces(image)
+    face_crops = crop_faces(image, faces)
+    expressions = detect_facial_expressions(face_crops)
+    face_summary = build_face_expression_summary(faces, expressions)
+
+    if face_summary:
+        enriched_caption = f"{base_caption}. {face_summary}"
+    else:
+        enriched_caption = base_caption
+
+    return base_caption, face_summary, enriched_caption
+
+
+# ---------- Story safety ----------
+
+def contains_unsafe_kids_content(text):
+    unsafe_terms = [
+        "kill", "killed", "killing", "murder", "blood", "bloody", "knife", "gun",
+        "dead", "death", "die", "dying", "attack", "attacked", "violence", "violent",
+        "hate", "hated", "naked", "sexy", "sex", "abuse", "abused", "drug", "drugs",
+        "alcohol", "beer", "wine", "terror", "monster killed", "fight to death"
+    ]
+
+    lowered = text.lower()
+    return any(term in lowered for term in unsafe_terms)
+
+
+def safe_story_fallback():
+    return (
+        "One bright day, a happy little family shared a lovely moment together. "
+        "They smiled, talked, and enjoyed being close to one another. "
+        "Everything felt warm, gentle, and full of care. "
+        "Soon, everyone felt cheerful and safe, and the day ended with a cozy, happy feeling."
+    )
+
+
+def enforce_kid_safe_story(story):
+    if not story or len(story.split()) < 20:
+        return safe_story_fallback()
+
+    if contains_unsafe_kids_content(story):
+        return safe_story_fallback()
+
+    return story
 
 
 # ---------- Story ----------
@@ -194,16 +379,34 @@ def get_voice_instruction(voice_style):
     return voice_map.get(voice_style, "Use a cheerful storytelling tone.")
 
 
+def extract_story_only(generated_text, prompt):
+    if generated_text.startswith(prompt):
+        generated_text = generated_text[len(prompt):]
+
+    markers = [
+        "Picture description:",
+        "Requirements:",
+        "Story version:",
+        "Story:"
+    ]
+    for marker in markers:
+        if marker in generated_text:
+            generated_text = generated_text.split(marker)[0]
+
+    return generated_text.strip()
+
+
 def clean_story(text):
     banned_phrases = [
         "story mode", "selected mode", "picture description", "image caption",
         "caption:", "prompt", "instruction", "story version", "rewrite version",
-        "new story version", "the story mode is", "write one brand new",
-        "write a fresh", "rules:", "requirements:"
+        "new story version", "rules:", "requirements:"
     ]
 
-    text = text.replace("\n", " ").strip()
-    raw_sentences = text.split(".")
+    text = text.replace("\\n", " ").replace("\n", " ").strip()
+    text = re.sub(r"\s+", " ", text)
+
+    raw_sentences = re.split(r"(?<=[.!?])\s+", text)
     cleaned = []
     seen = set()
 
@@ -217,13 +420,15 @@ def clean_story(text):
             continue
         if lower_sentence in seen:
             continue
+        if len(sentence.split()) < 3:
+            continue
 
         cleaned.append(sentence)
         seen.add(lower_sentence)
 
-    story = ". ".join(cleaned).strip()
+    story = " ".join(cleaned).strip()
 
-    if story and not story.endswith("."):
+    if story and story[-1] not in ".!?":
         story += "."
 
     words = story.split()
@@ -233,38 +438,19 @@ def clean_story(text):
     return story
 
 
-def generate_story_once(prompt, max_new_tokens=180):
-    model = get_story_model()
-    output = model(
-        prompt,
-        max_new_tokens=max_new_tokens,
-        min_length=50,
-        do_sample=True,
-        temperature=0.95,
-        top_p=0.95,
-        repetition_penalty=1.5,
-        no_repeat_ngram_size=3
-    )
-    return clean_story(output[0].get("generated_text", "").strip())
-
-
-def build_main_story_prompt(caption, mode, voice_style):
+def build_story_prompt(caption, mode, voice_style):
     story_seed = random.randint(1000, 999999)
     return f"""
+Write a short, friendly story of about 50 to 100 words for a child.
+
+Use the picture description carefully.
+Keep the story cheerful, easy to understand, imaginative, and suitable for young kids.
+Do not include violence, scary content, romance for adults, harmful behavior, or unsafe themes.
+Use the facial expressions naturally if they are mentioned.
+{get_style_instruction(mode)}
+{get_voice_instruction(voice_style)}
+
 Picture description: {caption}
-
-Write one brand new children's story in 50 to 100 words.
-
-Requirements:
-- Use the main nouns, objects, animals, and actions from the picture description.
-- Keep the story clearly related to the picture description.
-- {get_style_instruction(mode)}
-- {get_voice_instruction(voice_style)}
-- Make it cheerful, imaginative, playful, and suitable for young kids.
-- Use simple English.
-- Do not repeat sentences.
-- Do not mention labels like picture description, caption, prompt, instruction, or story mode.
-- End with a happy or warm feeling.
 
 Story version: {story_seed}
 
@@ -272,75 +458,59 @@ Story:
 """.strip()
 
 
-def build_expand_prompt(caption, mode, voice_style, short_story):
-    rewrite_seed = random.randint(1000, 999999)
-    return f"""
-Picture description: {caption}
+def generate_story_once(prompt, max_new_tokens=120):
+    tokenizer, model = get_story_components()
 
-Here is a short children's story:
-{short_story}
+    try:
+        device = next(model.parameters()).device
+    except StopIteration:
+        device = torch.device("cpu")
 
-Rewrite and expand it into one complete children's story in 50 to 100 words.
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
-Requirements:
-- Keep it clearly related to the picture description.
-- Keep the same core meaning, but add more cheerful and imaginative details.
-- {get_style_instruction(mode)}
-- {get_voice_instruction(voice_style)}
-- Use simple English for kids.
-- Do not repeat sentences.
-- Do not mention prompts, labels, caption, or story mode.
-- End with a happy or warm feeling.
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.9,
+            top_p=0.92,
+            repetition_penalty=1.2,
+            no_repeat_ngram_size=3,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
 
-Rewrite version: {rewrite_seed}
-
-Improved story:
-""".strip()
-
-
-def build_retry_prompt(caption, mode, voice_style):
-    retry_seed = random.randint(1000, 999999)
-    return f"""
-Picture description: {caption}
-
-Write a completely new children's story in 50 to 100 words.
-
-Requirements:
-- The story must be clearly based on the picture description.
-- Use the important nouns and actions from the picture description.
-- {get_style_instruction(mode)}
-- {get_voice_instruction(voice_style)}
-- Make it cheerful, imaginative, playful, and suitable for kids.
-- Use simple English.
-- Do not copy the picture description as a single sentence.
-- Do not repeat sentences.
-- Do not mention prompts, labels, caption, or story mode.
-- End happily.
-
-New story version: {retry_seed}
-
-Story:
-""".strip()
+    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    story = extract_story_only(text, prompt)
+    story = clean_story(story)
+    story = enforce_kid_safe_story(story)
+    return story
 
 
 def caption_to_story(caption, mode, voice_style):
-    story = generate_story_once(build_main_story_prompt(caption, mode, voice_style))
+    prompt = build_story_prompt(caption, mode, voice_style)
+    best_story = ""
 
-    if 50 <= len(story.split()) <= 100:
-        return story
+    for _ in range(3):
+        story = generate_story_once(prompt)
+        wc = len(story.split())
+        best_story = story
+        if 50 <= wc <= 100 and not contains_unsafe_kids_content(story):
+            return story
 
-    story = generate_story_once(build_expand_prompt(caption, mode, voice_style, story))
+    if len(best_story.split()) < 50:
+        best_story += (
+            " Everyone smiled, and the day felt warm, bright, and full of love. "
+            "The little ones were happy, and the family enjoyed their special moment together."
+        )
 
-    if 50 <= len(story.split()) <= 100:
-        return story
-
-    story = generate_story_once(build_retry_prompt(caption, mode, voice_style))
-
-    words = story.split()
+    words = best_story.split()
     if len(words) > 100:
-        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
+        best_story = " ".join(words[:100]).rstrip(".,;:! ") + "."
 
-    return story
+    return enforce_kid_safe_story(best_story)
 
 
 # ---------- Audio ----------
@@ -431,33 +601,39 @@ def show_entry_gate():
 
 
 def show_results():
-    if st.session_state.last_caption:
-        st.success("🐻 Parent bears vote a theme of a story!")
-        st.write(f"**Story theme:** {st.session_state.last_caption}")
+    if st.session_state.last_base_caption:
+        st.success("🐻 The parent bears looked at your picture.")
+        st.write(f"**What the bears saw:** {st.session_state.last_base_caption}")
+
+    if st.session_state.last_face_summary:
+        st.info(f"**Faces and expressions:** {st.session_state.last_face_summary}")
 
     if st.session_state.last_story:
-        st.markdown("### 🐻 Parent bears are telling story now....")
+        st.markdown("### 🐻 Your little-bear story")
         st.write(st.session_state.last_story)
 
     if st.session_state.last_audio_bytes:
-        st.success("🐻 Voice of the roarrrrr !")
+        st.success("🐻 The bear voice is ready!")
         st.audio(st.session_state.last_audio_bytes, format="audio/wav")
         st.download_button(
-            "🐻 Download the voice of bear",
+            "🐻 Download the bear voice",
             data=st.session_state.last_audio_bytes,
             file_name="kids_story.wav",
             mime="audio/wav"
         )
 
     if st.session_state.last_story or st.session_state.last_audio_bytes:
-        if st.button("🐻 Discuss with bears for another story with a new image!"):
+        if st.button("🐻 Make another story with a new image"):
             reset_for_another_story()
 
 
 def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
     if not st.session_state.last_caption:
         with st.spinner("📸 A tiny owl is peeking at your picture..."):
-            st.session_state.last_caption = image_to_caption(image)
+            base_caption, face_summary, enriched_caption = image_to_caption_with_expression(image)
+            st.session_state.last_base_caption = base_caption
+            st.session_state.last_face_summary = face_summary
+            st.session_state.last_caption = enriched_caption
 
     caption = st.session_state.last_caption
 
@@ -486,7 +662,7 @@ show_entry_gate()
 
 st.title(APP_TITLE)
 st.write(
-    "Upload an image, let the parent bears look at it, and enjoy a story and audio made for little bears."
+    "Upload an image and let the parent bears turn it into a child-friendly story and voice."
 )
 
 suffix = str(st.session_state.reset_counter)
@@ -522,11 +698,13 @@ save_uploaded_image(uploaded_image)
 
 if st.session_state.uploaded_image_bytes is not None:
     image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
-    st.image(image, caption="Uploaded Image", use_container_width=True)
+    st.image(image, caption="Uploaded image", use_container_width=True)
 
-    if st.button("🐻 Discuss with parent bears for a story", type="primary"):
+    if st.button("🐻 Ask the parent bears to tell a story", type="primary"):
         try:
             generate_story_and_audio(image, story_mode, voice_style, voice_tone)
+        except RuntimeError as e:
+            st.error(f"Memory or model loading issue: {e}")
         except Exception as e:
             st.error(f"Something went wrong: {e}")
 
