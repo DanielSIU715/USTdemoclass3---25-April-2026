@@ -762,15 +762,15 @@ def evaluate_kid_story(kid_story, model_story):
 
 
 def build_score_message(score):
-    animals = ["bears", "owls", "dogs", "rabbits", "foxes", "pandas"]
-    actions = ["clap for you", "dance with joy", "wave their paws", "jump up and down", "sing for you"]
+    animals = ["bear(s)", "dog(s)", "owl(s)", "rabbit(s)", "fox(es)", "panda(s)"]
+    actions = ["sing for you", "dance with joy", "wave their paws", "jump up and down", "clap for you"]
     positives = ["amazing", "full of joy", "bright", "wonderful", "super lovely"]
 
     animal = random.choice(animals)
     action = random.choice(actions)
     positive = random.choice(positives)
 
-    return f"Score: {score}/5! The {animal} forgot to {action} because your story is too {positive}!"
+    return f"{score} {animal} forgot to {action} because your story is too {positive}!"
 
 
 # ---------- Audio ----------
