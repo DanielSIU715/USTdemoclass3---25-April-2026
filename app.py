@@ -422,7 +422,7 @@ def image_to_caption_with_expression(image):
     child_facts = build_child_facts()
     child_context = build_child_context(child_facts)
 
-    enriched_parts = [base_caption]
+    enriched_parts = [f"Observed photo caption: {base_caption}."]
 
     if child_context:
         enriched_parts.append(child_context)
@@ -457,7 +457,8 @@ def extract_keywords(text):
         "this", "that", "with", "from", "have", "were", "what", "where", "when",
         "your", "photo", "about", "into", "they", "them", "their", "there",
         "little", "other", "more", "very", "just", "some", "because", "family",
-        "special", "taken", "doing", "background", "child"
+        "special", "taken", "doing", "background", "child", "observed", "caption",
+        "people", "look"
     }
     return [w for w in words if len(w) >= 4 and w not in stopwords]
 
@@ -496,6 +497,12 @@ def story_mentions_photo_content(story, base_caption):
     return match_count >= 1
 
 
+def build_emotion_closing(emotion_words):
+    if emotion_words:
+        return f"At the end, all the bears looked {emotion_words}, and that made the memory feel extra warm and happy."
+    return "At the end, all the bears looked calm and cheerful, and that made the memory feel extra warm and happy."
+
+
 def build_grounded_story(base_caption, emotion_words, child_facts):
     sentences = []
 
@@ -510,19 +517,15 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
     else:
         sentences.append("One happy day, a little bear and the family shared a lovely time together.")
 
+    sentences.append(f"The photo showed {base_caption}.")
+
     if about:
         sentences.append(f"This photo was about {about}.")
-    else:
-        sentences.append(f"The photo showed {base_caption}.")
 
     if doing:
         sentences.append(f"In the picture, the little bear was {doing}.")
     else:
         sentences.append("Everyone was enjoying the moment together.")
-
-    if emotion_words:
-        sentences.append(f"The people in the photo looked {emotion_words}.")
-        sentences.append("Their happy feelings made the moment bright and warm.")
 
     if special:
         sentences.append(f"This photo was special because {special}.")
@@ -530,12 +533,12 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
     if background:
         sentences.append(f"It was a lovely memory because {background}.")
 
-    sentences.append("It was a sweet moment that the little bears would always remember.")
+    sentences.append(build_emotion_closing(emotion_words))
 
     story = " ".join(sentences)
     words = story.split()
-    if len(words) > 95:
-        story = " ".join(words[:95]).rstrip(".,;:! ") + "."
+    if len(words) > 100:
+        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
 
     return story
 
@@ -575,28 +578,23 @@ def remove_unwanted_patterns(text):
     return text.strip()
 
 
-def ensure_emotions_in_story(story, emotion_words):
-    if not emotion_words:
-        return story
+def ensure_caption_in_story(story, base_caption):
+    story_lower = story.lower()
+    caption_lower = base_caption.lower().strip()
 
-    lowered_story = story.lower()
-    emotion_tokens = [e.strip().lower() for e in re.split(r",|and", emotion_words) if e.strip()]
-
-    if not any(token in lowered_story for token in emotion_tokens):
-        story += f" The people in the photo looked {emotion_words}, and those feelings made the memory even more special."
+    if caption_lower and caption_lower not in story_lower:
+        story = f"The photo showed {base_caption}. " + story
 
     return story
 
 
 def ensure_child_details_in_story(story, child_facts):
     story_lower = story.lower()
-    added = False
 
     if child_facts["about"]:
         about_keywords = extract_keywords(child_facts["about"])
         if about_keywords and not any(k in story_lower for k in about_keywords[:3]):
-            story += f" The photo was about {child_facts['about']}."
-            added = True
+            story += f" This photo was about {child_facts['about']}."
 
     story_lower = story.lower()
 
@@ -604,7 +602,6 @@ def ensure_child_details_in_story(story, child_facts):
         doing_keywords = extract_keywords(child_facts["doing"])
         if doing_keywords and not any(k in story_lower for k in doing_keywords[:3]):
             story += f" In the picture, the little bear was {child_facts['doing']}."
-            added = True
 
     story_lower = story.lower()
 
@@ -612,7 +609,6 @@ def ensure_child_details_in_story(story, child_facts):
         where_keywords = extract_keywords(child_facts["where"])
         if where_keywords and not any(k in story_lower for k in where_keywords[:2]):
             story += f" This special moment happened at {child_facts['where']}."
-            added = True
 
     story_lower = story.lower()
 
@@ -620,10 +616,81 @@ def ensure_child_details_in_story(story, child_facts):
         special_keywords = extract_keywords(child_facts["special"])
         if special_keywords and not any(k in story_lower for k in special_keywords[:3]):
             story += f" It was special because {child_facts['special']}."
-            added = True
 
-    if not added and not any(child_facts.values()):
-        story += " It was a lovely memory that the little bears would remember for a long time."
+    return story
+
+
+def ensure_emotion_closing(story, emotion_words):
+    closing_sentence = build_emotion_closing(emotion_words)
+    story = trim_to_last_complete_sentence(story)
+
+    sentences = re.split(r"(?<=[.!?])\s+", story.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    filtered = []
+    for sentence in sentences:
+        lower_sentence = sentence.lower()
+        if "looked happy" in lower_sentence or "looked sad" in lower_sentence or "looked angry" in lower_sentence \
+           or "looked surprised" in lower_sentence or "looked fearful" in lower_sentence \
+           or "looked disgusted" in lower_sentence or "looked neutral" in lower_sentence \
+           or "looked excited" in lower_sentence or "the people in the photo looked" in lower_sentence \
+           or "all the bears looked" in lower_sentence:
+            continue
+        filtered.append(sentence)
+
+    filtered.append(closing_sentence)
+    return " ".join(filtered).strip()
+
+
+def clean_story(text, base_caption="", emotion_words="", child_facts=None):
+    banned_phrases = [
+        "story mode", "selected mode", "picture description", "image caption",
+        "caption:", "prompt", "instruction", "story version", "rewrite version",
+        "new story version", "rules:", "requirements:", "observed photo caption:"
+    ]
+
+    child_facts = child_facts or build_child_facts()
+
+    text = text.replace("\\n", " ").replace("\n", " ").strip()
+    text = remove_unwanted_patterns(text)
+    text = re.sub(r"\s+", " ", text)
+
+    raw_sentences = re.split(r"(?<=[.!?])\s+", text)
+    cleaned = []
+    seen = set()
+
+    for sentence in raw_sentences:
+        sentence = " ".join(sentence.strip().split())
+        lower_sentence = sentence.lower()
+
+        if not sentence:
+            continue
+        if any(phrase in lower_sentence for phrase in banned_phrases):
+            continue
+        if lower_sentence in seen:
+            continue
+        if len(sentence.split()) < 3:
+            continue
+
+        cleaned.append(sentence)
+        seen.add(lower_sentence)
+
+    story = " ".join(cleaned).strip()
+    story = trim_to_last_complete_sentence(story)
+
+    if story and story[-1] not in ".!?":
+        story += "."
+
+    story = ensure_caption_in_story(story, base_caption)
+    story = ensure_child_details_in_story(story, child_facts)
+    story = ensure_emotion_closing(story, emotion_words)
+    story = trim_to_last_complete_sentence(story)
+
+    words = story.split()
+    if len(words) > 110:
+        shortened = " ".join(words[:110]).rstrip(".,;:! ")
+        story = trim_to_last_complete_sentence(shortened)
+        story = ensure_emotion_closing(story, emotion_words)
 
     return story
 
@@ -659,7 +726,8 @@ def extract_story_only(generated_text, prompt):
         "Picture description:",
         "Requirements:",
         "Story version:",
-        "Story:"
+        "Story:",
+        "Observed photo caption:"
     ]
     for marker in markers:
         if marker in generated_text:
@@ -668,67 +736,14 @@ def extract_story_only(generated_text, prompt):
     return generated_text.strip()
 
 
-def clean_story(text, emotion_words="", child_facts=None):
-    banned_phrases = [
-        "story mode", "selected mode", "picture description", "image caption",
-        "caption:", "prompt", "instruction", "story version", "rewrite version",
-        "new story version", "rules:", "requirements:"
-    ]
-
-    child_facts = child_facts or build_child_facts()
-
-    text = text.replace("\\n", " ").replace("\n", " ").strip()
-    text = remove_unwanted_patterns(text)
-    text = re.sub(r"\s+", " ", text)
-
-    raw_sentences = re.split(r"(?<=[.!?])\s+", text)
-    cleaned = []
-    seen = set()
-
-    for sentence in raw_sentences:
-        sentence = " ".join(sentence.strip().split())
-        lower_sentence = sentence.lower()
-
-        if not sentence:
-            continue
-        if any(phrase in lower_sentence for phrase in banned_phrases):
-            continue
-        if lower_sentence in seen:
-            continue
-        if len(sentence.split()) < 3:
-            continue
-
-        cleaned.append(sentence)
-        seen.add(lower_sentence)
-
-    story = " ".join(cleaned).strip()
-    story = trim_to_last_complete_sentence(story)
-
-    if story and story[-1] not in ".!?":
-        story += "."
-
-    story = ensure_emotions_in_story(story, emotion_words)
-    story = ensure_child_details_in_story(story, child_facts)
-    story = trim_to_last_complete_sentence(story)
-
-    words = story.split()
-    if len(words) > 110:
-        shortened = " ".join(words[:110]).rstrip(".,;:! ")
-        story = trim_to_last_complete_sentence(shortened)
-        if not story:
-            story = shortened + "."
-
-    return story
-
-
-def build_story_prompt(caption, mode, voice_style, emotion_words="", child_context=""):
+def build_story_prompt(caption, base_caption, mode, voice_style, emotion_words="", child_context=""):
     story_seed = random.randint(1000, 999999)
 
     extra_emotion_line = ""
     if emotion_words:
         extra_emotion_line = (
-            f"The story must clearly mention the people's emotions. "
-            f"Say that the people in the photo looked {emotion_words}."
+            f"The story must end by saying that all the bears looked {emotion_words}. "
+            f"The last sentence must describe these facial expressions."
         )
 
     extra_child_line = ""
@@ -742,16 +757,16 @@ def build_story_prompt(caption, mode, voice_style, emotion_words="", child_conte
     return f"""
 Write a very simple and sweet children's story for ages 5 to 8.
 
-Use only the picture description and the child's answers.
+Use only the observed photo caption and the child's answers.
 Do not invent unrelated events.
 Use very easy words.
 Use short sentences.
 Make the story warm, happy, gentle, and clear.
 The story must have a clear beginning, middle, and ending.
 Keep the story between 60 and 90 words.
-Every sentence must be complete and natural for children.
+The story must clearly mention this observed photo caption: {base_caption}.
+The final sentence must describe the facial expressions in the photo.
 Do not include references, citations, brackets, percentages, statistics, or random facts.
-Mention the emotions of the people in the photo clearly.
 {extra_emotion_line}
 {extra_child_line}
 {get_style_instruction(mode)}
@@ -765,7 +780,7 @@ Story:
 """.strip()
 
 
-def generate_story_once(prompt, emotion_words="", child_facts=None, max_new_tokens=140):
+def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=None, max_new_tokens=140):
     tokenizer, model = get_story_components()
 
     try:
@@ -791,17 +806,21 @@ def generate_story_once(prompt, emotion_words="", child_facts=None, max_new_toke
 
     text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     story = extract_story_only(text, prompt)
-    story = clean_story(story, emotion_words, child_facts)
+    story = clean_story(story, base_caption=base_caption, emotion_words=emotion_words, child_facts=child_facts)
     return story
 
 
 def caption_to_story(base_caption, caption, mode, voice_style, emotion_words="", child_context="", child_facts=None):
     child_facts = child_facts or build_child_facts()
-    prompt = build_story_prompt(caption, mode, voice_style, emotion_words, child_context)
-    best_story = ""
+    prompt = build_story_prompt(caption, base_caption, mode, voice_style, emotion_words, child_context)
 
     for _ in range(3):
-        story = generate_story_once(prompt, emotion_words=emotion_words, child_facts=child_facts)
+        story = generate_story_once(
+            prompt,
+            base_caption=base_caption,
+            emotion_words=emotion_words,
+            child_facts=child_facts
+        )
         story = enforce_kid_safe_story(
             story,
             base_caption=base_caption,
@@ -809,31 +828,26 @@ def caption_to_story(base_caption, caption, mode, voice_style, emotion_words="",
             child_context=child_context,
             child_facts=child_facts
         )
+        story = clean_story(story, base_caption=base_caption, emotion_words=emotion_words, child_facts=child_facts)
 
         wc = len(story.split())
-        best_story = story
-
-        emotion_ok = True
-        if emotion_words:
-            emotion_tokens = [e.strip().lower() for e in re.split(r",|and", emotion_words) if e.strip()]
-            emotion_ok = any(token in story.lower() for token in emotion_tokens)
-
         facts_ok = story_mentions_child_facts(story, child_facts)
         photo_ok = story_mentions_photo_content(story, base_caption)
+        closing_ok = build_emotion_closing(emotion_words).lower() in story.lower()
 
         if (
-            50 <= wc <= 110
+            50 <= wc <= 115
             and not contains_unsafe_kids_content(story)
             and "[" not in story
             and "%" not in story
-            and emotion_ok
             and facts_ok
             and photo_ok
+            and closing_ok
         ):
             return story
 
     grounded_story = build_grounded_story(base_caption, emotion_words, child_facts)
-    grounded_story = clean_story(grounded_story, emotion_words, child_facts)
+    grounded_story = clean_story(grounded_story, base_caption=base_caption, emotion_words=emotion_words, child_facts=child_facts)
     return grounded_story
 
 
