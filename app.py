@@ -90,6 +90,12 @@ def apply_custom_css():
         color: white;
     }
 
+    div[data-testid="stButton"] > button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        box-shadow: none;
+    }
+
     div[data-testid="stDownloadButton"] > button {
         border-radius: 999px;
         border: none;
@@ -994,12 +1000,16 @@ def caption_to_story(base_caption, caption, emotion_words="", child_facts=None):
 # ---------- Kid scoring functions ----------
 
 def evaluate_kid_story(kid_story, model_story):
-    """Score the child's story mainly by length, with a small bonus for simple sentence structure."""
+    """Score the child's story by length, but require at least two sentences to earn any score."""
     kid_story = (kid_story or "").strip()
     model_story = (model_story or "").strip()
 
     if not kid_story:
-        return 1
+        return 0
+
+    sentence_count = len(re.findall(r"[.!?]", kid_story))
+    if sentence_count < 2:
+        return 0
 
     kid_words = count_words(kid_story)
     model_words = max(1, count_words(model_story))
@@ -1016,12 +1026,6 @@ def evaluate_kid_story(kid_story, model_story):
             score = 2
         else:
             score = 1
-
-    has_end_punctuation = bool(re.search(r"[.!?]\s*$", kid_story))
-    has_two_sentences = len(re.findall(r"[.!?]", kid_story)) >= 2
-
-    if score < 5 and has_end_punctuation and has_two_sentences:
-        score += 1
 
     return max(1, min(5, score))
 
@@ -1153,7 +1157,6 @@ def show_reset_score_dialog():
             st.session_state.kid_score_message = None
             st.session_state.score_saved_for_current_story = False
             st.session_state.last_score_animal = None
-            st.success("All scores have been reset to zero.")
             st.rerun()
 
     with col2:
@@ -1239,16 +1242,30 @@ def show_kid_story_scoring_area():
 
     st.markdown("### 🐻 Write your own story")
     st.write("Now it is your turn to tell other little bears your own story.")
+    st.caption("You need to write at least two sentences to earn a score.")
 
     kid_story = st.text_area(
         "Type your story here",
         key=widget_key("kid_own_story"),
         height=180,
-        placeholder="Write your own little story here..."
+        placeholder="Write at least two sentences here..."
     )
 
-    if st.button("🐻 Share my stories with other little bears"):
+    kid_story_clean = (kid_story or "").strip()
+    can_submit = bool(kid_story_clean)
+
+    if st.button(
+        "🐻 Share my stories with other little bears",
+        disabled=not can_submit
+    ):
         score = evaluate_kid_story(kid_story, st.session_state.last_story)
+
+        if score == 0:
+            st.session_state.kid_score = 0
+            st.session_state.kid_score_message = (
+                "Please write at least two sentences before sharing your story with other little bears."
+            )
+            st.rerun()
 
         if not st.session_state.score_saved_for_current_story:
             animal_name = choose_animal_for_score()
@@ -1264,7 +1281,10 @@ def show_kid_story_scoring_area():
         st.rerun()
 
     if st.session_state.kid_score_message:
-        st.success(st.session_state.kid_score_message)
+        if st.session_state.kid_score == 0:
+            st.warning(st.session_state.kid_score_message)
+        else:
+            st.success(st.session_state.kid_score_message)
 
 
 def show_results():
