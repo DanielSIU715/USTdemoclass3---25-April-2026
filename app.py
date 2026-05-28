@@ -1,6 +1,7 @@
 import io
 import re
 import wave
+import random
 from collections import Counter
 
 import cv2
@@ -101,6 +102,8 @@ def init_state():
         "last_story": None,
         "last_audio_bytes": None,
         "last_emotion_words": DEFAULT_EMOTION,
+        "kid_score": None,
+        "kid_score_message": None,
         "reset_counter": 0,
     }
     for key, value in defaults.items():
@@ -119,6 +122,8 @@ def clear_generated_outputs():
     st.session_state.last_story = None
     st.session_state.last_audio_bytes = None
     st.session_state.last_emotion_words = DEFAULT_EMOTION
+    st.session_state.kid_score = None
+    st.session_state.kid_score_message = None
 
 
 def reset_for_another_story():
@@ -234,6 +239,10 @@ def simplify_text(text):
         out = out.replace(old, new)
 
     return out
+
+
+def count_words(text):
+    return len(re.findall(r"\b[\w']+\b", text))
 
 
 # ---------- Image ----------
@@ -467,6 +476,14 @@ def build_emotion_closing(emotion_words):
     return f"At the end, all the bears looked {emotion_words}, and that made the day feel warm and happy."
 
 
+def build_short_story_ending_fix(story, emotion_words):
+    sentences = re.split(r"(?<=[.!?])\s+", story.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+    filtered = [s for s in sentences if "all the bears looked" not in s.lower()]
+    filtered.append(build_emotion_closing(emotion_words))
+    return " ".join(filtered)
+
+
 def build_grounded_story(base_caption, emotion_words, child_facts):
     where = child_facts["where"]
     about = child_facts["about"]
@@ -506,14 +523,6 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
         story = build_short_story_ending_fix(story, emotion_words)
 
     return story
-
-
-def build_short_story_ending_fix(story, emotion_words):
-    sentences = re.split(r"(?<=[.!?])\s+", story.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
-    filtered = [s for s in sentences if "all the bears looked" not in s.lower()]
-    filtered.append(build_emotion_closing(emotion_words))
-    return " ".join(filtered)
 
 
 def ensure_caption_in_story(story, base_caption):
@@ -636,7 +645,7 @@ Make it sound warm, personal, and child-friendly.
 The story must clearly say: The photo showed {base_caption}.
 Use the child's own ideas as the most important details.
 Keep the story between 50 and 80 words.
-The last sentence must be: {build_emotion_closing(DEFAULT_EMOTION) if False else "Describe the faces in the photo in a warm way."}
+The last sentence must describe the faces in the photo in a warm way.
 
 Photo facts: {caption}
 Child photo topic: {child_facts.get("about", "")}
@@ -718,6 +727,52 @@ def caption_to_story(base_caption, caption, emotion_words="", child_facts=None):
     return build_grounded_story(base_caption, emotion_words, child_facts)
 
 
+# ---------- Kid scoring ----------
+
+def evaluate_kid_story(kid_story, model_story):
+    kid_story = (kid_story or "").strip()
+    model_story = (model_story or "").strip()
+
+    if not kid_story:
+        return 1
+
+    kid_words = count_words(kid_story)
+    model_words = max(1, count_words(model_story))
+
+    if kid_words > model_words:
+        score = 5
+    else:
+        ratio = kid_words / model_words
+        if ratio >= 0.8:
+            score = 4
+        elif ratio >= 0.55:
+            score = 3
+        elif ratio >= 0.3:
+            score = 2
+        else:
+            score = 1
+
+    has_end_punctuation = bool(re.search(r"[.!?]\s*$", kid_story))
+    has_two_sentences = len(re.findall(r"[.!?]", kid_story)) >= 2
+
+    if score < 5 and has_end_punctuation and has_two_sentences:
+        score += 1
+
+    return max(1, min(5, score))
+
+
+def build_score_message(score):
+    animals = ["bears", "owls", "dogs", "rabbits", "foxes", "pandas"]
+    actions = ["clap for you", "dance with joy", "wave their paws", "jump up and down", "sing for you"]
+    positives = ["amazing", "full of joy", "bright", "wonderful", "super lovely"]
+
+    animal = random.choice(animals)
+    action = random.choice(actions)
+    positive = random.choice(positives)
+
+    return f"Score: {score}/5! The {animal} forgot to {action} because your story is too {positive}!"
+
+
 # ---------- Audio ----------
 
 def apply_voice_effects(audio, sr):
@@ -726,7 +781,6 @@ def apply_voice_effects(audio, sr):
     if audio.size == 0:
         raise ValueError("Generated audio is empty.")
 
-    # Teenage bear effect
     pitch_steps = 2
     audio = librosa.effects.pitch_shift(audio, sr=sr, n_steps=pitch_steps)
 
@@ -835,6 +889,31 @@ def show_kid_questions():
     )
 
 
+def show_kid_story_scoring_area():
+    if not st.session_state.last_story:
+        return
+
+    st.markdown("### 🐻 Write your own story")
+    st.write("Now it is your turn to tell other little bears your own story.")
+
+    kid_story = st.text_area(
+        "Type your story here",
+        key=widget_key("kid_own_story"),
+        height=180,
+        placeholder="Write your own little story here..."
+    )
+
+    if st.button("🐻 Share my stories with other little bears"):
+        score = evaluate_kid_story(kid_story, st.session_state.last_story)
+        message = build_score_message(score)
+        st.session_state.kid_score = score
+        st.session_state.kid_score_message = message
+        st.rerun()
+
+    if st.session_state.kid_score_message:
+        st.success(st.session_state.kid_score_message)
+
+
 def show_results():
     if st.session_state.last_base_caption:
         st.success("🐻 The parent bears looked at your picture.")
@@ -856,6 +935,9 @@ def show_results():
             file_name="kids_story.wav",
             mime="audio/wav"
         )
+
+    if st.session_state.last_story:
+        show_kid_story_scoring_area()
 
     if st.session_state.last_story or st.session_state.last_audio_bytes:
         if st.button("🐻 Make another story with a new image"):
@@ -895,6 +977,8 @@ def generate_story_and_audio(image, form_values):
 
     st.session_state.last_story = story
     st.session_state.last_audio_bytes = audio_bytes
+    st.session_state.kid_score = None
+    st.session_state.kid_score_message = None
 
 
 # ---------- Main ----------
