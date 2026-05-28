@@ -169,9 +169,7 @@ def get_story_components():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model_kwargs = {
-        "low_cpu_mem_usage": True
-    }
+    model_kwargs = {"low_cpu_mem_usage": True}
 
     if device == "cuda":
         model_kwargs["torch_dtype"] = torch.float16
@@ -284,7 +282,8 @@ def normalize_expression_label(label):
         "angry": "angry",
         "surprise": "surprised",
         "fear": "fearful",
-        "disgust": "disgusted"
+        "disgust": "disgusted",
+        "excited": "excited"
     }
     return mapping.get(label, label)
 
@@ -326,6 +325,15 @@ def build_face_expression_summary(faces, expressions):
     return f"{face_count} faces detected. The expressions appear to be: {joined}."
 
 
+def get_emotion_words(expressions):
+    if not expressions:
+        return ""
+
+    counts = Counter(expressions)
+    emotion_list = [emotion for emotion, _ in counts.most_common()]
+    return ", ".join(emotion_list)
+
+
 def image_to_caption(image):
     model = get_img2text_model()
 
@@ -360,13 +368,14 @@ def image_to_caption_with_expression(image):
     face_crops = crop_faces(image, faces)
     expressions = detect_facial_expressions(face_crops)
     face_summary = build_face_expression_summary(faces, expressions)
+    emotion_words = get_emotion_words(expressions)
 
-    if face_summary:
-        enriched_caption = f"{base_caption}. {face_summary}"
+    if emotion_words:
+        enriched_caption = f"{base_caption}. The people look {emotion_words}."
     else:
         enriched_caption = base_caption
 
-    return base_caption, face_summary, enriched_caption
+    return base_caption, face_summary, enriched_caption, emotion_words
 
 
 # ---------- Story safety ----------
@@ -383,7 +392,14 @@ def contains_unsafe_kids_content(text):
     return any(term in lowered for term in unsafe_terms)
 
 
-def safe_story_fallback():
+def safe_story_fallback(emotion_words=""):
+    if emotion_words:
+        return (
+            f"One bright day, a happy little family shared a lovely moment together. "
+            f"They looked {emotion_words}, and their smiles made the day feel extra special. "
+            f"They talked, laughed, and stayed close to one another. "
+            f"Everything felt warm, gentle, and full of care, and the day ended with a cozy, happy feeling."
+        )
     return (
         "One bright day, a happy little family shared a lovely moment together. "
         "They smiled, talked, and enjoyed being close to one another. "
@@ -392,12 +408,42 @@ def safe_story_fallback():
     )
 
 
-def enforce_kid_safe_story(story):
+def enforce_kid_safe_story(story, emotion_words=""):
     if not story or len(story.split()) < 20:
-        return safe_story_fallback()
+        return safe_story_fallback(emotion_words)
 
     if contains_unsafe_kids_content(story):
-        return safe_story_fallback()
+        return safe_story_fallback(emotion_words)
+
+    return story
+
+
+# ---------- Story cleaning ----------
+
+def trim_to_last_complete_sentence(text):
+    matches = list(re.finditer(r"[.!?]", text))
+    if not matches:
+        return text.strip()
+
+    last_end = matches[-1].end()
+    return text[:last_end].strip()
+
+
+def remove_unwanted_patterns(text):
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"\(\d+\)", "", text)
+    text = re.sub(r"\b\d+%\b", "", text)
+    text = re.sub(r"\b\d+\s*percent\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def ensure_emotions_in_story(story, emotion_words):
+    if not emotion_words:
+        return story
+
+    if emotion_words.lower() not in story.lower():
+        story += f" Everyone looked {emotion_words}, and that made the moment feel even more special."
 
     return story
 
@@ -442,7 +488,7 @@ def extract_story_only(generated_text, prompt):
     return generated_text.strip()
 
 
-def clean_story(text):
+def clean_story(text, emotion_words=""):
     banned_phrases = [
         "story mode", "selected mode", "picture description", "image caption",
         "caption:", "prompt", "instruction", "story version", "rewrite version",
@@ -450,6 +496,7 @@ def clean_story(text):
     ]
 
     text = text.replace("\\n", " ").replace("\n", " ").strip()
+    text = remove_unwanted_patterns(text)
     text = re.sub(r"\s+", " ", text)
 
     raw_sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -473,26 +520,42 @@ def clean_story(text):
         seen.add(lower_sentence)
 
     story = " ".join(cleaned).strip()
+    story = trim_to_last_complete_sentence(story)
 
     if story and story[-1] not in ".!?":
         story += "."
 
+    story = ensure_emotions_in_story(story, emotion_words)
+    story = trim_to_last_complete_sentence(story)
+
     words = story.split()
     if len(words) > 100:
-        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
+        shortened = " ".join(words[:100]).rstrip(".,;:! ")
+        story = trim_to_last_complete_sentence(shortened)
+        if not story:
+            story = shortened + "."
 
     return story
 
 
-def build_story_prompt(caption, mode, voice_style):
+def build_story_prompt(caption, mode, voice_style, emotion_words=""):
     story_seed = random.randint(1000, 999999)
+
+    extra_emotion_line = ""
+    if emotion_words:
+        extra_emotion_line = (
+            f"The story must clearly mention that the people look {emotion_words}. "
+            f"Repeat these feelings naturally in the story."
+        )
+
     return f"""
-Write a short, friendly story of about 50 to 100 words for a child.
+Write a short, friendly children's story of about 60 to 90 words.
 
 Use the picture description carefully.
-Keep the story cheerful, easy to understand, imaginative, and suitable for young kids.
-Do not include violence, scary content, romance for adults, harmful behavior, or unsafe themes.
-Use the facial expressions naturally if they are mentioned.
+Keep the story cheerful, easy to understand, imaginative, complete, and suitable for young kids.
+Do not include violence, scary content, romance for adults, harmful behavior, references, citations, brackets, scores, percentages, or statistics.
+Every sentence must be complete and natural for children.
+{extra_emotion_line}
 {get_style_instruction(mode)}
 {get_voice_instruction(voice_style)}
 
@@ -504,7 +567,7 @@ Story:
 """.strip()
 
 
-def generate_story_once(prompt, max_new_tokens=120):
+def generate_story_once(prompt, emotion_words="", max_new_tokens=140):
     tokenizer, model = get_story_components()
 
     try:
@@ -520,9 +583,9 @@ def generate_story_once(prompt, max_new_tokens=120):
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.9,
-            top_p=0.92,
-            repetition_penalty=1.2,
+            temperature=0.85,
+            top_p=0.9,
+            repetition_penalty=1.25,
             no_repeat_ngram_size=3,
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id
@@ -530,33 +593,38 @@ def generate_story_once(prompt, max_new_tokens=120):
 
     text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     story = extract_story_only(text, prompt)
-    story = clean_story(story)
-    story = enforce_kid_safe_story(story)
+    story = clean_story(story, emotion_words)
+    story = enforce_kid_safe_story(story, emotion_words)
     return story
 
 
-def caption_to_story(caption, mode, voice_style):
-    prompt = build_story_prompt(caption, mode, voice_style)
+def caption_to_story(caption, mode, voice_style, emotion_words=""):
+    prompt = build_story_prompt(caption, mode, voice_style, emotion_words)
     best_story = ""
 
     for _ in range(3):
-        story = generate_story_once(prompt)
+        story = generate_story_once(prompt, emotion_words=emotion_words)
         wc = len(story.split())
         best_story = story
-        if 50 <= wc <= 100 and not contains_unsafe_kids_content(story):
+
+        if (
+            50 <= wc <= 100
+            and not contains_unsafe_kids_content(story)
+            and "["
+            not in story
+            and "%"
+            not in story
+        ):
             return story
 
     if len(best_story.split()) < 50:
-        best_story += (
-            " Everyone smiled, and the day felt warm, bright, and full of love. "
-            "The little ones were happy, and the family enjoyed their special moment together."
-        )
+        if emotion_words:
+            best_story += f" Everyone looked {emotion_words}, and their happy feelings made the day shine brightly."
+        else:
+            best_story += " Everyone smiled, and the day felt warm, bright, and full of love."
 
-    words = best_story.split()
-    if len(words) > 100:
-        best_story = " ".join(words[:100]).rstrip(".,;:! ") + "."
-
-    return enforce_kid_safe_story(best_story)
+    best_story = clean_story(best_story, emotion_words)
+    return enforce_kid_safe_story(best_story, emotion_words)
 
 
 # ---------- Audio ----------
@@ -676,15 +744,18 @@ def show_results():
 def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
     if not st.session_state.last_caption:
         with st.spinner("📸 A tiny owl is peeking at your picture..."):
-            base_caption, face_summary, enriched_caption = image_to_caption_with_expression(image)
+            base_caption, face_summary, enriched_caption, emotion_words = image_to_caption_with_expression(image)
             st.session_state.last_base_caption = base_caption
             st.session_state.last_face_summary = face_summary
             st.session_state.last_caption = enriched_caption
+            st.session_state.last_emotion_words = emotion_words
+    else:
+        emotion_words = st.session_state.get("last_emotion_words", "")
 
     caption = st.session_state.last_caption
 
     with st.spinner("🍰 Your story is in the oven!"):
-        story = caption_to_story(caption, story_mode, voice_style)
+        story = caption_to_story(caption, story_mode, voice_style, emotion_words)
 
     with st.spinner("🐻 Some little bears are tasting your story!"):
         voice_audio, sr = text_to_audio(story, voice_style, voice_tone)
