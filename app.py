@@ -1,8 +1,10 @@
 import io
+import json
 import re
 import wave
 import random
 from collections import Counter
+from pathlib import Path
 
 import cv2
 import librosa
@@ -16,6 +18,11 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
 DEFAULT_CAPTION = "a happy family enjoying a special outdoor moment together"
 DEFAULT_EMOTION = "happy"
+
+DEFAULT_USERNAME = "Little UST Bear"
+DEFAULT_PASSWORD = "123456"
+
+SCORES_FILE = "user_scores.json"
 
 
 # ---------- Style ----------
@@ -89,11 +96,69 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 
+# ---------- Score storage ----------
+
+def load_score_data():
+    path = Path(SCORES_FILE)
+    if not path.exists():
+        return {}
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
+
+
+def save_score_data(data):
+    path = Path(SCORES_FILE)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def get_total_score(username):
+    data = load_score_data()
+    user_data = data.get(username, {})
+    return int(user_data.get("total_score", 0))
+
+
+def add_score_to_user(username, score):
+    data = load_score_data()
+
+    if username not in data:
+        data[username] = {
+            "password": DEFAULT_PASSWORD,
+            "total_score": 0,
+            "score_history": []
+        }
+
+    data[username]["total_score"] = int(data[username].get("total_score", 0)) + int(score)
+    data[username]["score_history"].append(int(score))
+
+    save_score_data(data)
+
+
+def ensure_default_user():
+    data = load_score_data()
+    if DEFAULT_USERNAME not in data:
+        data[DEFAULT_USERNAME] = {
+            "password": DEFAULT_PASSWORD,
+            "total_score": 0,
+            "score_history": []
+        }
+        save_score_data(data)
+
+
 # ---------- State ----------
 
 def init_state():
     defaults = {
         "entry_confirmed": None,
+        "logged_in": False,
+        "current_user": "",
         "uploaded_image_bytes": None,
         "uploaded_image_name": None,
         "last_caption": None,
@@ -104,6 +169,7 @@ def init_state():
         "last_emotion_words": DEFAULT_EMOTION,
         "kid_score": None,
         "kid_score_message": None,
+        "score_saved_for_current_story": False,
         "reset_counter": 0,
     }
     for key, value in defaults.items():
@@ -124,6 +190,7 @@ def clear_generated_outputs():
     st.session_state.last_emotion_words = DEFAULT_EMOTION
     st.session_state.kid_score = None
     st.session_state.kid_score_message = None
+    st.session_state.score_saved_for_current_story = False
 
 
 def reset_for_another_story():
@@ -762,15 +829,13 @@ def evaluate_kid_story(kid_story, model_story):
 
 
 def build_score_message(score):
-    animals = ["bear(s)", "dog(s)", "owl(s)", "rabbit(s)", "fox(es)", "panda(s)"]
     actions = ["sing for you", "dance with joy", "wave their paws", "jump up and down", "clap for you"]
     positives = ["amazing", "full of joy", "bright", "wonderful", "super lovely"]
 
-    animal = random.choice(animals)
     action = random.choice(actions)
     positive = random.choice(positives)
 
-    return f"{score} {animal} forgot to {action} because your story is too {positive}!"
+    return f"{score} bear(s) forgot to {action} because your story is too {positive}!"
 
 
 # ---------- Audio ----------
@@ -816,7 +881,7 @@ def audio_to_wav_bytes(audio, sr):
     return buffer.read()
 
 
-# ---------- UI ----------
+# ---------- Login / sidebar ----------
 
 def show_entry_gate():
     if st.session_state.entry_confirmed is None:
@@ -845,6 +910,48 @@ def show_entry_gate():
         st.error("Please leave this website.")
         st.stop()
 
+
+def show_login_page():
+    if st.session_state.logged_in:
+        return
+
+    st.title("🐻 Little Bear Login")
+    st.write("Please log in before entering the story world.")
+
+    with st.form("login_form"):
+        username = st.text_input("User name", value=DEFAULT_USERNAME)
+        password = st.text_input("Password", type="password", value=DEFAULT_PASSWORD)
+        submitted = st.form_submit_button("Log in")
+
+    if submitted:
+        if username == DEFAULT_USERNAME and password == DEFAULT_PASSWORD:
+            st.session_state.logged_in = True
+            st.session_state.current_user = username
+            st.rerun()
+        else:
+            st.error("Wrong user name or password.")
+
+    st.stop()
+
+
+def show_sidebar_user_panel():
+    if not st.session_state.logged_in:
+        return
+
+    username = st.session_state.current_user
+    total_score = get_total_score(username)
+
+    st.sidebar.markdown("## 🐻 Little Bear Account")
+    st.sidebar.write(f"**User name:** {username}")
+    st.sidebar.write(f"**Total score:** {total_score} animals are following you!")
+
+    if st.sidebar.button("Log out"):
+        st.session_state.logged_in = False
+        st.session_state.current_user = ""
+        reset_for_another_story()
+
+
+# ---------- UI ----------
 
 def show_kid_questions():
     st.markdown("### 🐻 Tell other little bears more about your photo")
@@ -906,8 +1013,14 @@ def show_kid_story_scoring_area():
     if st.button("🐻 Share my stories with other little bears"):
         score = evaluate_kid_story(kid_story, st.session_state.last_story)
         message = build_score_message(score)
+
         st.session_state.kid_score = score
         st.session_state.kid_score_message = message
+
+        if not st.session_state.score_saved_for_current_story:
+            add_score_to_user(st.session_state.current_user, score)
+            st.session_state.score_saved_for_current_story = True
+
         st.rerun()
 
     if st.session_state.kid_score_message:
@@ -979,6 +1092,7 @@ def generate_story_and_audio(image, form_values):
     st.session_state.last_audio_bytes = audio_bytes
     st.session_state.kid_score = None
     st.session_state.kid_score_message = None
+    st.session_state.score_saved_for_current_story = False
 
 
 # ---------- Main ----------
@@ -986,12 +1100,15 @@ def generate_story_and_audio(image, form_values):
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="🐻",
-    layout="centered"
+    layout="wide"
 )
 
 apply_custom_css()
+ensure_default_user()
 init_state()
 show_entry_gate()
+show_login_page()
+show_sidebar_user_panel()
 
 st.title(APP_TITLE)
 st.write("Upload one image and let the parent bears turn it into a child-friendly story and voice.")
