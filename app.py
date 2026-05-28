@@ -15,6 +15,10 @@ from PIL import Image, UnidentifiedImageError
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
+# =========================================================
+# CONSTANTS
+# =========================================================
+
 APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
 DEFAULT_CAPTION = "a happy family enjoying a special outdoor moment together"
 DEFAULT_EMOTION = "happy"
@@ -24,10 +28,24 @@ DEFAULT_PASSWORD = "123456"
 
 SCORES_FILE = "user_scores.json"
 
+ANIMAL_INFO = {
+    "Bear": {"icon": "🐻"},
+    "Owl": {"icon": "🦉"},
+    "Dog": {"icon": "🐶"},
+    "Rabbit": {"icon": "🐰"},
+    "Fox": {"icon": "🦊"},
+    "Panda": {"icon": "🐼"},
+}
 
-# ---------- Style ----------
+
+# =========================================================
+# FUNCTIONS
+# =========================================================
+
+# ---------- Styling functions ----------
 
 def apply_custom_css():
+    """Apply the visual style for the app interface."""
     st.markdown("""
     <style>
     .stApp {
@@ -96,9 +114,15 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 
-# ---------- Score storage ----------
+# ---------- Score storage functions ----------
+
+def default_animal_scores():
+    """Create the initial animal subtotal dictionary."""
+    return {animal: 0 for animal in ANIMAL_INFO.keys()}
+
 
 def load_score_data():
+    """Load saved user score data from the local JSON file."""
     path = Path(SCORES_FILE)
     if not path.exists():
         return {}
@@ -114,47 +138,108 @@ def load_score_data():
 
 
 def save_score_data(data):
+    """Save all user score data to the local JSON file."""
     path = Path(SCORES_FILE)
     with path.open("w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 
-def get_total_score(username):
+def ensure_default_user():
+    """Ensure the default demo user exists in the score file."""
     data = load_score_data()
-    user_data = data.get(username, {})
+    if DEFAULT_USERNAME not in data:
+        data[DEFAULT_USERNAME] = {
+            "password": DEFAULT_PASSWORD,
+            "total_score": 0,
+            "score_history": [],
+            "animal_scores": default_animal_scores(),
+        }
+        save_score_data(data)
+        return
+
+    changed = False
+    if "animal_scores" not in data[DEFAULT_USERNAME]:
+        data[DEFAULT_USERNAME]["animal_scores"] = default_animal_scores()
+        changed = True
+
+    for animal in ANIMAL_INFO.keys():
+        if animal not in data[DEFAULT_USERNAME]["animal_scores"]:
+            data[DEFAULT_USERNAME]["animal_scores"][animal] = 0
+            changed = True
+
+    if changed:
+        save_score_data(data)
+
+
+def get_user_data(username):
+    """Get one user's score record, including total and animal subtotals."""
+    data = load_score_data()
+    user_data = data.get(username)
+
+    if not user_data:
+        user_data = {
+            "password": DEFAULT_PASSWORD,
+            "total_score": 0,
+            "score_history": [],
+            "animal_scores": default_animal_scores(),
+        }
+
+    if "animal_scores" not in user_data:
+        user_data["animal_scores"] = default_animal_scores()
+
+    for animal in ANIMAL_INFO.keys():
+        user_data["animal_scores"].setdefault(animal, 0)
+
+    user_data.setdefault("total_score", 0)
+    user_data.setdefault("score_history", [])
+
+    return user_data
+
+
+def get_total_score(username):
+    """Return the total number of animals collected by the user."""
+    user_data = get_user_data(username)
     return int(user_data.get("total_score", 0))
 
 
-def add_score_to_user(username, score):
+def get_animal_scores(username):
+    """Return the subtotal score for each animal type."""
+    user_data = get_user_data(username)
+    return user_data.get("animal_scores", default_animal_scores())
+
+
+def choose_animal_for_score():
+    """Randomly choose which animal receives the current story score."""
+    return random.choice(list(ANIMAL_INFO.keys()))
+
+
+def add_score_to_user(username, score, animal_name):
+    """Add the new story score to the user's total and one animal subtotal."""
     data = load_score_data()
 
     if username not in data:
         data[username] = {
             "password": DEFAULT_PASSWORD,
             "total_score": 0,
-            "score_history": []
+            "score_history": [],
+            "animal_scores": default_animal_scores(),
         }
+
+    data[username].setdefault("animal_scores", default_animal_scores())
+    for animal in ANIMAL_INFO.keys():
+        data[username]["animal_scores"].setdefault(animal, 0)
 
     data[username]["total_score"] = int(data[username].get("total_score", 0)) + int(score)
     data[username]["score_history"].append(int(score))
+    data[username]["animal_scores"][animal_name] = int(data[username]["animal_scores"].get(animal_name, 0)) + int(score)
 
     save_score_data(data)
 
 
-def ensure_default_user():
-    data = load_score_data()
-    if DEFAULT_USERNAME not in data:
-        data[DEFAULT_USERNAME] = {
-            "password": DEFAULT_PASSWORD,
-            "total_score": 0,
-            "score_history": []
-        }
-        save_score_data(data)
-
-
-# ---------- State ----------
+# ---------- Session state functions ----------
 
 def init_state():
+    """Initialize all session-state variables used by the app."""
     defaults = {
         "entry_confirmed": None,
         "logged_in": False,
@@ -170,6 +255,7 @@ def init_state():
         "kid_score": None,
         "kid_score_message": None,
         "score_saved_for_current_story": False,
+        "last_score_animal": None,
         "reset_counter": 0,
     }
     for key, value in defaults.items():
@@ -178,10 +264,12 @@ def init_state():
 
 
 def widget_key(name):
+    """Create a reset-safe widget key."""
     return f"{name}_{st.session_state.reset_counter}"
 
 
 def clear_generated_outputs():
+    """Clear generated story, audio, and scoring results for a fresh story cycle."""
     st.session_state.last_caption = None
     st.session_state.last_base_caption = None
     st.session_state.last_face_summary = None
@@ -191,9 +279,11 @@ def clear_generated_outputs():
     st.session_state.kid_score = None
     st.session_state.kid_score_message = None
     st.session_state.score_saved_for_current_story = False
+    st.session_state.last_score_animal = None
 
 
 def reset_for_another_story():
+    """Reset only the story-generation workflow while keeping the user logged in."""
     st.session_state.uploaded_image_bytes = None
     st.session_state.uploaded_image_name = None
     clear_generated_outputs()
@@ -201,20 +291,30 @@ def reset_for_another_story():
     st.rerun()
 
 
-# ---------- Device helpers ----------
+def logout_and_return_to_warning():
+    """Log out the user and return the app to the original warning page."""
+    keys_to_keep = []
+    for key in list(st.session_state.keys()):
+        if key not in keys_to_keep:
+            del st.session_state[key]
+    st.rerun()
+
+
+# ---------- Device and model helper functions ----------
 
 def get_device():
+    """Return the best available torch device."""
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def get_pipeline_device():
+    """Return Streamlit pipeline device index for Hugging Face pipelines."""
     return 0 if torch.cuda.is_available() else -1
 
 
-# ---------- Models ----------
-
 @st.cache_resource
 def get_img2text_model():
+    """Load the image captioning model."""
     try:
         return pipeline(
             "image-to-text",
@@ -227,6 +327,7 @@ def get_img2text_model():
 
 @st.cache_resource
 def get_expression_model():
+    """Load the facial expression recognition model."""
     return pipeline(
         "image-classification",
         model="mo-thecreator/vit-Facial-Expression-Recognition",
@@ -236,6 +337,7 @@ def get_expression_model():
 
 @st.cache_resource
 def get_tts_model():
+    """Load the text-to-speech model."""
     return pipeline(
         "text-to-speech",
         model="facebook/mms-tts-eng",
@@ -245,6 +347,7 @@ def get_tts_model():
 
 @st.cache_resource
 def get_story_components():
+    """Load the tokenizer and story-generation model."""
     model_name = "gpt2-medium"
     device = get_device()
 
@@ -268,6 +371,7 @@ def get_story_components():
 
 @st.cache_resource
 def get_face_detector():
+    """Load the OpenCV face detector."""
     cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
     detector = cv2.CascadeClassifier(cascade_path)
     if detector.empty():
@@ -275,9 +379,10 @@ def get_face_detector():
     return detector
 
 
-# ---------- Helpers ----------
+# ---------- General helper functions ----------
 
 def get_current_form_values():
+    """Read all current child input fields from the screen."""
     return {
         "background": st.session_state.get(widget_key("kid_background"), "").strip(),
         "about": st.session_state.get(widget_key("kid_photo_about"), "").strip(),
@@ -288,6 +393,7 @@ def get_current_form_values():
 
 
 def simplify_text(text):
+    """Replace harder words with simpler child-friendly wording."""
     replacements = {
         "shared a lovely time together": "had a nice time together",
         "special moment": "happy moment",
@@ -309,12 +415,60 @@ def simplify_text(text):
 
 
 def count_words(text):
+    """Count the number of words in a story."""
     return len(re.findall(r"\b[\w']+\b", text))
 
 
-# ---------- Image ----------
+def remove_html_and_code_fragments(text):
+    """Remove HTML tags, comments, and code-like fragments from generated text."""
+    text = re.sub(r"<!--.*?-->", " ", text, flags=re.DOTALL)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\{[^{}]*\}", " ", text)
+    text = re.sub(r"\b[a-zA-Z_]+\s*=\s*['\"].*?['\"]", " ", text)
+    text = re.sub(r"\b(width|height|style|class|id|src)\s*=\s*[^ ]+", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:http|https)://\S+", " ", text)
+    text = re.sub(r"&[a-zA-Z0-9#]+;", " ", text)
+    return text
+
+
+def remove_non_story_noise(text):
+    """Remove suspicious code-related sentences that do not belong to a story."""
+    noise_patterns = [
+        r"iframe",
+        r"fb_main",
+        r"xmlns",
+        r"javascript",
+        r"function\s*\(",
+        r"var\s+[a-zA-Z_]",
+        r"document\.",
+        r"window\.",
+        r"<div",
+        r"</div>",
+        r"<span",
+        r"</span>",
+    ]
+
+    cleaned_sentences = []
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+
+    for sentence in sentences:
+        sentence_stripped = sentence.strip()
+        if not sentence_stripped:
+            continue
+
+        lower_sentence = sentence_stripped.lower()
+        if any(re.search(pattern, lower_sentence) for pattern in noise_patterns):
+            continue
+
+        cleaned_sentences.append(sentence_stripped)
+
+    return " ".join(cleaned_sentences).strip()
+
+
+# ---------- Image processing functions ----------
 
 def validate_uploaded_image(uploaded_image):
+    """Validate the uploaded image type."""
     if uploaded_image is None:
         return
 
@@ -326,6 +480,7 @@ def validate_uploaded_image(uploaded_image):
 
 
 def load_image_from_bytes(image_bytes):
+    """Convert uploaded bytes into a PIL image."""
     try:
         image = Image.open(io.BytesIO(image_bytes))
         image.load()
@@ -339,6 +494,7 @@ def load_image_from_bytes(image_bytes):
 
 
 def save_uploaded_image(uploaded_image):
+    """Save a newly uploaded image into session state."""
     if uploaded_image is None:
         return
 
@@ -355,11 +511,13 @@ def save_uploaded_image(uploaded_image):
 
 
 def pil_to_cv2(image):
+    """Convert a PIL image to an OpenCV image."""
     rgb = np.array(image)
     return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
 
 def detect_faces(image):
+    """Detect faces in the uploaded image."""
     detector = get_face_detector()
     cv_img = pil_to_cv2(image)
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
@@ -375,6 +533,7 @@ def detect_faces(image):
 
 
 def crop_faces(image, faces):
+    """Crop each detected face for expression analysis."""
     rgb = np.array(image)
     crops = []
 
@@ -387,6 +546,7 @@ def crop_faces(image, faces):
 
 
 def normalize_expression_label(label):
+    """Map model emotion labels into simpler child-friendly emotion words."""
     label = str(label).strip().lower()
     mapping = {
         "happiness": "happy",
@@ -405,6 +565,7 @@ def normalize_expression_label(label):
 
 
 def detect_facial_expressions(face_crops):
+    """Predict facial emotions from detected face crops."""
     if not face_crops:
         return [DEFAULT_EMOTION]
 
@@ -427,6 +588,7 @@ def detect_facial_expressions(face_crops):
 
 
 def build_face_expression_summary(faces, expressions):
+    """Create a short summary of detected faces and their emotions."""
     if not expressions:
         expressions = [DEFAULT_EMOTION]
 
@@ -445,6 +607,7 @@ def build_face_expression_summary(faces, expressions):
 
 
 def get_emotion_words(expressions):
+    """Turn detected emotions into a readable phrase."""
     if not expressions:
         return DEFAULT_EMOTION
 
@@ -459,6 +622,7 @@ def get_emotion_words(expressions):
 
 
 def image_to_caption(image):
+    """Generate a basic caption for the uploaded image."""
     model = get_img2text_model()
 
     if model is None:
@@ -483,20 +647,17 @@ def image_to_caption(image):
 
 
 def build_child_context(child_facts):
+    """Combine the child's answers into one text block for story prompting."""
     parts = []
 
     if child_facts["background"]:
         parts.append(f"Background from the child: {child_facts['background']}")
-
     if child_facts["about"]:
         parts.append(f"What the photo is about: {child_facts['about']}")
-
     if child_facts["doing"]:
         parts.append(f"What the child was doing: {child_facts['doing']}")
-
     if child_facts["special"]:
         parts.append(f"Why the photo is special: {child_facts['special']}")
-
     if child_facts["where"]:
         parts.append(f"Where the photo was taken: {child_facts['where']}")
 
@@ -504,6 +665,7 @@ def build_child_context(child_facts):
 
 
 def image_to_caption_with_expression(image, child_facts):
+    """Build an enriched caption using image content, child answers, and facial emotions."""
     base_caption = image_to_caption(image)
     faces = detect_faces(image)
     face_crops = crop_faces(image, faces)
@@ -513,10 +675,8 @@ def image_to_caption_with_expression(image, child_facts):
     child_context = build_child_context(child_facts)
 
     enriched_parts = [f"Observed photo caption: {base_caption}."]
-
     if child_context:
         enriched_parts.append(child_context)
-
     enriched_parts.append(f"The feeling in the photo is {emotion_words}.")
 
     enriched_caption = " ".join(part for part in enriched_parts if part).strip()
@@ -524,9 +684,10 @@ def image_to_caption_with_expression(image, child_facts):
     return base_caption, face_summary, enriched_caption, emotion_words
 
 
-# ---------- Story ----------
+# ---------- Story generation functions ----------
 
 def contains_unsafe_kids_content(text):
+    """Check whether a generated story contains unsafe words for children."""
     unsafe_terms = [
         "kill", "killed", "killing", "murder", "blood", "bloody", "knife", "gun",
         "dead", "death", "die", "dying", "attack", "attacked", "violence", "violent",
@@ -538,12 +699,14 @@ def contains_unsafe_kids_content(text):
 
 
 def build_emotion_closing(emotion_words):
+    """Create a warm closing sentence based on the detected emotions."""
     if not emotion_words:
         emotion_words = DEFAULT_EMOTION
     return f"At the end, all the bears looked {emotion_words}, and that made the day feel warm and happy."
 
 
 def build_short_story_ending_fix(story, emotion_words):
+    """Ensure the final sentence uses the required emotion-based ending."""
     sentences = re.split(r"(?<=[.!?])\s+", story.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
     filtered = [s for s in sentences if "all the bears looked" not in s.lower()]
@@ -552,6 +715,7 @@ def build_short_story_ending_fix(story, emotion_words):
 
 
 def build_grounded_story(base_caption, emotion_words, child_facts):
+    """Create a safe fallback story if the language model output is not usable."""
     where = child_facts["where"]
     about = child_facts["about"]
     doing = child_facts["doing"]
@@ -569,13 +733,10 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
 
     if about:
         sentences.append(f"This photo was about {about}.")
-
     if doing:
         sentences.append(f"In the picture, the little bear was {doing}.")
-
     if special:
         sentences.append(f"It was special because {special}.")
-
     if background:
         sentences.append(f"It was a happy memory because {background}.")
 
@@ -593,29 +754,28 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
 
 
 def ensure_caption_in_story(story, base_caption):
+    """Make sure the final story includes the key photo caption."""
     if base_caption.lower().strip() not in story.lower():
         story = f"The photo showed {base_caption}. " + story
     return story
 
 
 def ensure_child_details_in_story(story, child_facts):
+    """Make sure the final story contains the child's important answers."""
     story_lower = story.lower()
 
     if child_facts["about"] and child_facts["about"].lower() not in story_lower:
         story += f" This photo was about {child_facts['about']}."
 
     story_lower = story.lower()
-
     if child_facts["doing"] and child_facts["doing"].lower() not in story_lower:
         story += f" In the picture, the little bear was {child_facts['doing']}."
 
     story_lower = story.lower()
-
     if child_facts["where"] and child_facts["where"].lower() not in story_lower:
         story += f" This happy moment happened at {child_facts['where']}."
 
     story_lower = story.lower()
-
     if child_facts["special"] and child_facts["special"].lower() not in story_lower:
         story += f" It was special because {child_facts['special']}."
 
@@ -623,14 +783,17 @@ def ensure_child_details_in_story(story, child_facts):
 
 
 def ensure_emotion_closing(story, emotion_words):
+    """Make sure the final story ends with the required warm emotion sentence."""
     return build_short_story_ending_fix(story, emotion_words or DEFAULT_EMOTION)
 
 
 def clean_story(text, base_caption="", emotion_words="", child_facts=None):
+    """Clean model output by removing prompt leakage, HTML/code fragments, and repeated text."""
     if child_facts is None:
         child_facts = {"background": "", "about": "", "doing": "", "special": "", "where": ""}
 
     text = text.replace("\\n", " ").replace("\n", " ").strip()
+    text = remove_html_and_code_fragments(text)
     text = re.sub(r"\[\d+\]", "", text)
     text = re.sub(r"\(\d+\)", "", text)
     text = re.sub(r"\s+", " ", text)
@@ -638,7 +801,9 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
     banned_phrases = [
         "story mode", "selected mode", "picture description", "image caption",
         "caption:", "prompt", "instruction", "story version", "rewrite version",
-        "new story version", "rules:", "requirements:", "observed photo caption:"
+        "new story version", "rules:", "requirements:", "observed photo caption:",
+        "write a very simple", "child photo topic", "child action",
+        "child special reason", "child place", "child background"
     ]
 
     raw_sentences = re.split(r"(?<=[.!?])\s+", text)
@@ -653,6 +818,12 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
             continue
         if any(phrase in lower_sentence for phrase in banned_phrases):
             continue
+        if "<" in sentence or ">" in sentence:
+            continue
+        if "{" in sentence or "}" in sentence:
+            continue
+        if "style=" in lower_sentence or "width=" in lower_sentence or "height=" in lower_sentence:
+            continue
         if lower_sentence in seen:
             continue
         if len(sentence.split()) < 3:
@@ -662,6 +833,8 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
         seen.add(lower_sentence)
 
     story = " ".join(cleaned).strip()
+    story = remove_non_story_noise(story)
+    story = re.sub(r"\s+", " ", story).strip()
 
     if story and story[-1] not in ".!?":
         story += "."
@@ -680,6 +853,7 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
 
 
 def extract_story_only(generated_text, prompt):
+    """Remove the original prompt from the raw generated text."""
     if generated_text.startswith(prompt):
         generated_text = generated_text[len(prompt):]
 
@@ -698,6 +872,7 @@ def extract_story_only(generated_text, prompt):
 
 
 def build_story_prompt(caption, base_caption, child_facts):
+    """Build the prompt used by the story generation model."""
     return f"""
 Write a very simple diary-style story for a young child aged 4 to 7.
 
@@ -726,6 +901,7 @@ Story:
 
 
 def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=None, max_new_tokens=110):
+    """Generate one candidate story from the language model."""
     tokenizer, model = get_story_components()
 
     try:
@@ -756,6 +932,7 @@ def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=N
 
 
 def child_facts_covered(story, child_facts):
+    """Check whether the generated story includes the child's main details."""
     checks = 0
     passed = 0
 
@@ -773,6 +950,7 @@ def child_facts_covered(story, child_facts):
 
 
 def caption_to_story(base_caption, caption, emotion_words="", child_facts=None):
+    """Generate a clean and child-friendly story, with fallback if needed."""
     child_facts = child_facts or {"background": "", "about": "", "doing": "", "special": "", "where": ""}
     if not emotion_words:
         emotion_words = DEFAULT_EMOTION
@@ -794,9 +972,10 @@ def caption_to_story(base_caption, caption, emotion_words="", child_facts=None):
     return build_grounded_story(base_caption, emotion_words, child_facts)
 
 
-# ---------- Kid scoring ----------
+# ---------- Kid scoring functions ----------
 
 def evaluate_kid_story(kid_story, model_story):
+    """Score the child's story mainly by length, with a small bonus for simple sentence structure."""
     kid_story = (kid_story or "").strip()
     model_story = (model_story or "").strip()
 
@@ -828,19 +1007,22 @@ def evaluate_kid_story(kid_story, model_story):
     return max(1, min(5, score))
 
 
-def build_score_message(score):
+def build_score_message(score, animal_name):
+    """Build the fun score message shown after story submission."""
     actions = ["sing for you", "dance with joy", "wave their paws", "jump up and down", "clap for you"]
     positives = ["amazing", "full of joy", "bright", "wonderful", "super lovely"]
 
+    icon = ANIMAL_INFO[animal_name]["icon"]
     action = random.choice(actions)
     positive = random.choice(positives)
 
-    return f"{score} bear(s) forgot to {action} because your story is too {positive}!"
+    return f"{score} {animal_name.lower()}(s) {icon} forgot to {action} because your story is too {positive}!"
 
 
-# ---------- Audio ----------
+# ---------- Audio functions ----------
 
 def apply_voice_effects(audio, sr):
+    """Apply a simple pitch effect to make the voice sound more playful."""
     audio = np.asarray(audio, dtype=np.float32).squeeze()
 
     if audio.size == 0:
@@ -853,6 +1035,7 @@ def apply_voice_effects(audio, sr):
 
 
 def text_to_audio(text):
+    """Convert the final story text into audio."""
     tts = get_tts_model()
     output = tts(text)
 
@@ -867,6 +1050,7 @@ def text_to_audio(text):
 
 
 def audio_to_wav_bytes(audio, sr):
+    """Convert a NumPy audio array into WAV bytes for playback and download."""
     audio = np.clip(audio, -1.0, 1.0)
     audio_int16 = (audio * 32767).astype(np.int16)
 
@@ -881,9 +1065,10 @@ def audio_to_wav_bytes(audio, sr):
     return buffer.read()
 
 
-# ---------- Login / sidebar ----------
+# ---------- UI control functions ----------
 
 def show_entry_gate():
+    """Display the age warning page before the user can continue."""
     if st.session_state.entry_confirmed is None:
         st.title("🐻 Welcome, Little Bear 🐾")
         st.warning(
@@ -912,6 +1097,7 @@ def show_entry_gate():
 
 
 def show_login_page():
+    """Display the login page after the warning page is accepted."""
     if st.session_state.logged_in:
         return
 
@@ -919,8 +1105,8 @@ def show_login_page():
     st.write("Please log in before entering the story world.")
 
     with st.form("login_form"):
-        username = st.text_input("User name", value=DEFAULT_USERNAME)
-        password = st.text_input("Password", type="password", value=DEFAULT_PASSWORD)
+        username = st.text_input("User name", value="", placeholder="Enter your user name")
+        password = st.text_input("Password", type="password", value="", placeholder="Enter your password")
         submitted = st.form_submit_button("Log in")
 
     if submitted:
@@ -935,25 +1121,29 @@ def show_login_page():
 
 
 def show_sidebar_user_panel():
+    """Show the logged-in user profile, total animals, and animal subtotals in the sidebar."""
     if not st.session_state.logged_in:
         return
 
     username = st.session_state.current_user
     total_score = get_total_score(username)
+    animal_scores = get_animal_scores(username)
 
     st.sidebar.markdown("## 🐻 Little Bear Account")
     st.sidebar.write(f"**User name:** {username}")
     st.sidebar.write(f"**Total score:** {total_score} animals are following you!")
 
+    st.sidebar.markdown("### Animal followers")
+    for animal, meta in ANIMAL_INFO.items():
+        subtotal = int(animal_scores.get(animal, 0))
+        st.sidebar.write(f"{meta['icon']} {animal}: {subtotal}")
+
     if st.sidebar.button("Log out"):
-        st.session_state.logged_in = False
-        st.session_state.current_user = ""
-        reset_for_another_story()
+        logout_and_return_to_warning()
 
-
-# ---------- UI ----------
 
 def show_kid_questions():
+    """Display the child input questions that guide the story generation."""
     st.markdown("### 🐻 Tell other little bears more about your photo")
     st.write("You can answer these questions to help the parent bears make a better story.")
 
@@ -997,6 +1187,7 @@ def show_kid_questions():
 
 
 def show_kid_story_scoring_area():
+    """Display the child's own story box and scoring button."""
     if not st.session_state.last_story:
         return
 
@@ -1012,15 +1203,18 @@ def show_kid_story_scoring_area():
 
     if st.button("🐻 Share my stories with other little bears"):
         score = evaluate_kid_story(kid_story, st.session_state.last_story)
-        message = build_score_message(score)
-
-        st.session_state.kid_score = score
-        st.session_state.kid_score_message = message
 
         if not st.session_state.score_saved_for_current_story:
-            add_score_to_user(st.session_state.current_user, score)
+            animal_name = choose_animal_for_score()
+            add_score_to_user(st.session_state.current_user, score, animal_name)
+            st.session_state.last_score_animal = animal_name
             st.session_state.score_saved_for_current_story = True
+        else:
+            animal_name = st.session_state.last_score_animal or "Bear"
 
+        message = build_score_message(score, animal_name)
+        st.session_state.kid_score = score
+        st.session_state.kid_score_message = message
         st.rerun()
 
     if st.session_state.kid_score_message:
@@ -1028,6 +1222,7 @@ def show_kid_story_scoring_area():
 
 
 def show_results():
+    """Display the generated caption, story, audio, scoring area, and reset button."""
     if st.session_state.last_base_caption:
         st.success("🐻 The parent bears looked at your picture.")
         st.write(f"**What the bears saw:** {st.session_state.last_base_caption}")
@@ -1058,6 +1253,7 @@ def show_results():
 
 
 def generate_story_and_audio(image, form_values):
+    """Generate the final story and voice from the uploaded image and child inputs."""
     child_facts = {
         "background": form_values["background"],
         "about": form_values["about"],
@@ -1093,9 +1289,12 @@ def generate_story_and_audio(image, form_values):
     st.session_state.kid_score = None
     st.session_state.kid_score_message = None
     st.session_state.score_saved_for_current_story = False
+    st.session_state.last_score_animal = None
 
 
-# ---------- Main ----------
+# =========================================================
+# MAIN APP
+# =========================================================
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -1106,6 +1305,7 @@ st.set_page_config(
 apply_custom_css()
 ensure_default_user()
 init_state()
+
 show_entry_gate()
 show_login_page()
 show_sidebar_user_panel()
@@ -1116,11 +1316,13 @@ st.write("Upload one image and let the parent bears turn it into a child-friendl
 show_kid_questions()
 
 uploaded_image = st.file_uploader(
-    "Upload one image",
+    "Upload one image only",
     type=["jpg", "jpeg", "png", "webp"],
     accept_multiple_files=False,
     key=widget_key("uploader")
 )
+
+st.caption("Please upload only one image each time. To use a new image, click 'Make another story with a new image' first.")
 
 try:
     save_uploaded_image(uploaded_image)
