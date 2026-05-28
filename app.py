@@ -14,6 +14,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
 APP_TITLE = "🐻🐾 Parent Bears are telling stories right now! Let's join with other little bears! 🐾🐻"
+DEFAULT_CAPTION = "a happy family enjoying a special outdoor moment together"
 
 
 # ---------- Style ----------
@@ -99,7 +100,13 @@ def init_state():
         "last_face_summary": None,
         "last_story": None,
         "last_audio_bytes": None,
+        "last_emotion_words": "",
         "reset_counter": 0,
+        "kid_background": "",
+        "kid_photo_about": "",
+        "kid_doing": "",
+        "kid_special": "",
+        "kid_where": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -114,6 +121,12 @@ def reset_for_another_story():
     st.session_state.last_face_summary = None
     st.session_state.last_story = None
     st.session_state.last_audio_bytes = None
+    st.session_state.last_emotion_words = ""
+    st.session_state.kid_background = ""
+    st.session_state.kid_photo_about = ""
+    st.session_state.kid_doing = ""
+    st.session_state.kid_special = ""
+    st.session_state.kid_where = ""
     st.session_state.reset_counter += 1
     st.rerun()
 
@@ -236,6 +249,7 @@ def save_uploaded_image(uploaded_image):
         st.session_state.last_face_summary = None
         st.session_state.last_story = None
         st.session_state.last_audio_bytes = None
+        st.session_state.last_emotion_words = ""
 
 
 def pil_to_cv2(image):
@@ -331,20 +345,25 @@ def get_emotion_words(expressions):
 
     counts = Counter(expressions)
     emotion_list = [emotion for emotion, _ in counts.most_common()]
-    return ", ".join(emotion_list)
+
+    if len(emotion_list) == 1:
+        return emotion_list[0]
+    if len(emotion_list) == 2:
+        return f"{emotion_list[0]} and {emotion_list[1]}"
+    return ", ".join(emotion_list[:-1]) + f", and {emotion_list[-1]}"
 
 
 def image_to_caption(image):
     model = get_img2text_model()
 
     if model is None:
-        return "a happy family enjoying a special outdoor moment together"
+        return DEFAULT_CAPTION
 
     try:
         output = model(image)
 
         if not output:
-            return "a happy family enjoying a special outdoor moment together"
+            return DEFAULT_CAPTION
 
         first = output[0]
         caption = (
@@ -354,12 +373,33 @@ def image_to_caption(image):
         ).strip()
 
         if not caption:
-            return "a happy family enjoying a special outdoor moment together"
+            return DEFAULT_CAPTION
 
         return caption
 
     except Exception:
-        return "a happy family enjoying a special outdoor moment together"
+        return DEFAULT_CAPTION
+
+
+def build_child_context():
+    parts = []
+
+    if st.session_state.kid_background.strip():
+        parts.append(f"Background from the child: {st.session_state.kid_background.strip()}")
+
+    if st.session_state.kid_photo_about.strip():
+        parts.append(f"What the photo is about: {st.session_state.kid_photo_about.strip()}")
+
+    if st.session_state.kid_doing.strip():
+        parts.append(f"What the child was doing: {st.session_state.kid_doing.strip()}")
+
+    if st.session_state.kid_special.strip():
+        parts.append(f"Why the photo is special: {st.session_state.kid_special.strip()}")
+
+    if st.session_state.kid_where.strip():
+        parts.append(f"Where the photo was taken: {st.session_state.kid_where.strip()}")
+
+    return " ".join(parts).strip()
 
 
 def image_to_caption_with_expression(image):
@@ -369,13 +409,19 @@ def image_to_caption_with_expression(image):
     expressions = detect_facial_expressions(face_crops)
     face_summary = build_face_expression_summary(faces, expressions)
     emotion_words = get_emotion_words(expressions)
+    child_context = build_child_context()
+
+    enriched_parts = [base_caption]
+
+    if child_context:
+        enriched_parts.append(child_context)
 
     if emotion_words:
-        enriched_caption = f"{base_caption}. The people look {emotion_words}."
-    else:
-        enriched_caption = base_caption
+        enriched_parts.append(f"The people in the photo look {emotion_words}.")
 
-    return base_caption, face_summary, enriched_caption, emotion_words
+    enriched_caption = " ".join(part for part in enriched_parts if part).strip()
+
+    return base_caption, face_summary, enriched_caption, emotion_words, child_context
 
 
 # ---------- Story safety ----------
@@ -392,28 +438,32 @@ def contains_unsafe_kids_content(text):
     return any(term in lowered for term in unsafe_terms)
 
 
-def safe_story_fallback(emotion_words=""):
+def safe_story_fallback(emotion_words="", child_context=""):
+    extra = ""
+    if child_context:
+        extra = " It was a very special memory, and everyone wanted to remember it."
+
     if emotion_words:
         return (
             f"One bright day, a happy little family shared a lovely moment together. "
-            f"They looked {emotion_words}, and their smiles made the day feel extra special. "
-            f"They talked, laughed, and stayed close to one another. "
+            f"The people in the photo looked {emotion_words}, and their feelings made the moment shine. "
+            f"They talked, laughed, and stayed close to one another.{extra} "
             f"Everything felt warm, gentle, and full of care, and the day ended with a cozy, happy feeling."
         )
+
     return (
         "One bright day, a happy little family shared a lovely moment together. "
         "They smiled, talked, and enjoyed being close to one another. "
-        "Everything felt warm, gentle, and full of care. "
-        "Soon, everyone felt cheerful and safe, and the day ended with a cozy, happy feeling."
+        f"{extra} Everything felt warm, gentle, and full of care, and the day ended with a cozy, happy feeling."
     )
 
 
-def enforce_kid_safe_story(story, emotion_words=""):
+def enforce_kid_safe_story(story, emotion_words="", child_context=""):
     if not story or len(story.split()) < 20:
-        return safe_story_fallback(emotion_words)
+        return safe_story_fallback(emotion_words, child_context)
 
     if contains_unsafe_kids_content(story):
-        return safe_story_fallback(emotion_words)
+        return safe_story_fallback(emotion_words, child_context)
 
     return story
 
@@ -442,8 +492,35 @@ def ensure_emotions_in_story(story, emotion_words):
     if not emotion_words:
         return story
 
-    if emotion_words.lower() not in story.lower():
-        story += f" Everyone looked {emotion_words}, and that made the moment feel even more special."
+    lowered_story = story.lower()
+    emotion_tokens = [e.strip().lower() for e in re.split(r",|and", emotion_words) if e.strip()]
+
+    if not any(token in lowered_story for token in emotion_tokens):
+        story += f" The people in the photo looked {emotion_words}, and those feelings made the memory even more special."
+
+    return story
+
+
+def ensure_child_details_in_story(story, child_context):
+    if not child_context:
+        return story
+
+    keywords = []
+    for source in [
+        st.session_state.kid_photo_about,
+        st.session_state.kid_doing,
+        st.session_state.kid_special,
+        st.session_state.kid_where,
+    ]:
+        value = source.strip().lower()
+        if value:
+            keywords.extend([w for w in re.findall(r"[a-zA-Z]+", value) if len(w) >= 4])
+
+    keywords = list(dict.fromkeys(keywords))[:6]
+    lowered_story = story.lower()
+
+    if keywords and not any(word in lowered_story for word in keywords):
+        story += " It was a special photo full of meaning, and it helped the little bears remember that lovely moment."
 
     return story
 
@@ -488,7 +565,7 @@ def extract_story_only(generated_text, prompt):
     return generated_text.strip()
 
 
-def clean_story(text, emotion_words=""):
+def clean_story(text, emotion_words="", child_context=""):
     banned_phrases = [
         "story mode", "selected mode", "picture description", "image caption",
         "caption:", "prompt", "instruction", "story version", "rewrite version",
@@ -526,11 +603,12 @@ def clean_story(text, emotion_words=""):
         story += "."
 
     story = ensure_emotions_in_story(story, emotion_words)
+    story = ensure_child_details_in_story(story, child_context)
     story = trim_to_last_complete_sentence(story)
 
     words = story.split()
-    if len(words) > 100:
-        shortened = " ".join(words[:100]).rstrip(".,;:! ")
+    if len(words) > 110:
+        shortened = " ".join(words[:110]).rstrip(".,;:! ")
         story = trim_to_last_complete_sentence(shortened)
         if not story:
             story = shortened + "."
@@ -538,24 +616,34 @@ def clean_story(text, emotion_words=""):
     return story
 
 
-def build_story_prompt(caption, mode, voice_style, emotion_words=""):
+def build_story_prompt(caption, mode, voice_style, emotion_words="", child_context=""):
     story_seed = random.randint(1000, 999999)
 
     extra_emotion_line = ""
     if emotion_words:
         extra_emotion_line = (
-            f"The story must clearly mention that the people look {emotion_words}. "
+            f"The story must clearly mention the people's emotions. "
+            f"Say that the people in the photo looked {emotion_words}. "
             f"Repeat these feelings naturally in the story."
         )
 
+    extra_child_line = ""
+    if child_context:
+        extra_child_line = (
+            "Use the child's background details in the story. "
+            "Treat the child's answers as important facts about the photo."
+        )
+
     return f"""
-Write a short, friendly children's story of about 60 to 90 words.
+Write a short, friendly children's story of about 70 to 100 words.
 
 Use the picture description carefully.
 Keep the story cheerful, easy to understand, imaginative, complete, and suitable for young kids.
 Do not include violence, scary content, romance for adults, harmful behavior, references, citations, brackets, scores, percentages, or statistics.
 Every sentence must be complete and natural for children.
+Mention the emotions of the people in the photo clearly.
 {extra_emotion_line}
+{extra_child_line}
 {get_style_instruction(mode)}
 {get_voice_instruction(voice_style)}
 
@@ -567,7 +655,7 @@ Story:
 """.strip()
 
 
-def generate_story_once(prompt, emotion_words="", max_new_tokens=140):
+def generate_story_once(prompt, emotion_words="", child_context="", max_new_tokens=150):
     tokenizer, model = get_story_components()
 
     try:
@@ -583,7 +671,7 @@ def generate_story_once(prompt, emotion_words="", max_new_tokens=140):
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.85,
+            temperature=0.82,
             top_p=0.9,
             repetition_penalty=1.25,
             no_repeat_ngram_size=3,
@@ -593,38 +681,42 @@ def generate_story_once(prompt, emotion_words="", max_new_tokens=140):
 
     text = tokenizer.decode(outputs[0], skip_special_tokens=True)
     story = extract_story_only(text, prompt)
-    story = clean_story(story, emotion_words)
-    story = enforce_kid_safe_story(story, emotion_words)
+    story = clean_story(story, emotion_words, child_context)
+    story = enforce_kid_safe_story(story, emotion_words, child_context)
     return story
 
 
-def caption_to_story(caption, mode, voice_style, emotion_words=""):
-    prompt = build_story_prompt(caption, mode, voice_style, emotion_words)
+def caption_to_story(caption, mode, voice_style, emotion_words="", child_context=""):
+    prompt = build_story_prompt(caption, mode, voice_style, emotion_words, child_context)
     best_story = ""
 
     for _ in range(3):
-        story = generate_story_once(prompt, emotion_words=emotion_words)
+        story = generate_story_once(prompt, emotion_words=emotion_words, child_context=child_context)
         wc = len(story.split())
         best_story = story
 
+        emotion_ok = True
+        if emotion_words:
+            emotion_tokens = [e.strip().lower() for e in re.split(r",|and", emotion_words) if e.strip()]
+            emotion_ok = any(token in story.lower() for token in emotion_tokens)
+
         if (
-            50 <= wc <= 100
+            50 <= wc <= 110
             and not contains_unsafe_kids_content(story)
-            and "["
-            not in story
-            and "%"
-            not in story
+            and "[" not in story
+            and "%" not in story
+            and emotion_ok
         ):
             return story
 
     if len(best_story.split()) < 50:
         if emotion_words:
-            best_story += f" Everyone looked {emotion_words}, and their happy feelings made the day shine brightly."
+            best_story += f" The people in the photo looked {emotion_words}, and their feelings made the moment bright and special."
         else:
             best_story += " Everyone smiled, and the day felt warm, bright, and full of love."
 
-    best_story = clean_story(best_story, emotion_words)
-    return enforce_kid_safe_story(best_story, emotion_words)
+    best_story = clean_story(best_story, emotion_words, child_context)
+    return enforce_kid_safe_story(best_story, emotion_words, child_context)
 
 
 # ---------- Audio ----------
@@ -714,6 +806,46 @@ def show_entry_gate():
         st.stop()
 
 
+def show_kid_questions():
+    st.markdown("### 🐻 Tell other little bears more about your photo")
+    st.write("You can answer these questions to help the parent bears make a better story.")
+
+    st.text_area(
+        "Can you share more background to other little bears about your photo?",
+        key="kid_background",
+        height=90,
+        placeholder="For example: This was during our family picnic and everyone was very excited."
+    )
+
+    st.text_area(
+        "What is this photo about?",
+        key="kid_photo_about",
+        height=80,
+        placeholder="For example: It is about my family having fun together."
+    )
+
+    st.text_area(
+        "What were you doing in the photo?",
+        key="kid_doing",
+        height=80,
+        placeholder="For example: I was smiling, playing, or holding something special."
+    )
+
+    st.text_area(
+        "Why is this photo special for you?",
+        key="kid_special",
+        height=80,
+        placeholder="For example: It reminds me of a happy day with my family."
+    )
+
+    st.text_area(
+        "Where was this photo taken?",
+        key="kid_where",
+        height=80,
+        placeholder="For example: At the park, beach, school, or at home."
+    )
+
+
 def show_results():
     if st.session_state.last_base_caption:
         st.success("🐻 The parent bears looked at your picture.")
@@ -744,18 +876,19 @@ def show_results():
 def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
     if not st.session_state.last_caption:
         with st.spinner("📸 A tiny owl is peeking at your picture..."):
-            base_caption, face_summary, enriched_caption, emotion_words = image_to_caption_with_expression(image)
+            base_caption, face_summary, enriched_caption, emotion_words, child_context = image_to_caption_with_expression(image)
             st.session_state.last_base_caption = base_caption
             st.session_state.last_face_summary = face_summary
             st.session_state.last_caption = enriched_caption
             st.session_state.last_emotion_words = emotion_words
     else:
         emotion_words = st.session_state.get("last_emotion_words", "")
+        child_context = build_child_context()
 
     caption = st.session_state.last_caption
 
     with st.spinner("🍰 Your story is in the oven!"):
-        story = caption_to_story(caption, story_mode, voice_style, emotion_words)
+        story = caption_to_story(caption, story_mode, voice_style, emotion_words, child_context)
 
     with st.spinner("🐻 Some little bears are tasting your story!"):
         voice_audio, sr = text_to_audio(story, voice_style, voice_tone)
@@ -804,6 +937,8 @@ voice_tone = st.selectbox(
     index=0,
     key=f"voice_tone_{suffix}"
 )
+
+show_kid_questions()
 
 uploaded_image = st.file_uploader(
     "Upload an image",
