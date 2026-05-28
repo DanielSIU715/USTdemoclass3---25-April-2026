@@ -9,7 +9,7 @@ import librosa
 import numpy as np
 import streamlit as st
 import torch
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 
@@ -193,14 +193,35 @@ def get_face_detector():
 
 # ---------- Image ----------
 
+def validate_uploaded_image(uploaded_image):
+    if uploaded_image is None:
+        return
+
+    allowed_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    name = uploaded_image.name.lower()
+
+    if not any(name.endswith(ext) for ext in allowed_exts):
+        raise ValueError("Unsupported file type. Please upload JPG, JPEG, PNG, or WEBP.")
+
+
 def load_image_from_bytes(image_bytes):
-    return Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        image.load()
+        return image.convert("RGB")
+    except UnidentifiedImageError:
+        raise ValueError("This image file could not be identified. Please upload a valid JPG, JPEG, PNG, or WEBP image.")
+    except Exception as e:
+        raise ValueError(
+            f"Unable to read this image file. Please upload a valid JPG, JPEG, PNG, or WEBP image. Details: {e}"
+        )
 
 
 def save_uploaded_image(uploaded_image):
     if uploaded_image is None:
         return
 
+    validate_uploaded_image(uploaded_image)
     uploaded_bytes = uploaded_image.getvalue()
 
     if (
@@ -690,23 +711,30 @@ voice_tone = st.selectbox(
 
 uploaded_image = st.file_uploader(
     "Upload an image",
-    type=["jpg", "jpeg", "png"],
+    type=["jpg", "jpeg", "png", "webp"],
     key=f"uploader_{suffix}"
 )
 
-save_uploaded_image(uploaded_image)
+try:
+    save_uploaded_image(uploaded_image)
+except Exception as e:
+    st.error(str(e))
+    uploaded_image = None
 
 if st.session_state.uploaded_image_bytes is not None:
-    image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
-    st.image(image, caption="Uploaded image", use_container_width=True)
+    try:
+        image = load_image_from_bytes(st.session_state.uploaded_image_bytes)
+        st.image(image, caption="Uploaded image", use_container_width=True)
 
-    if st.button("🐻 Ask the parent bears to tell a story", type="primary"):
-        try:
-            generate_story_and_audio(image, story_mode, voice_style, voice_tone)
-        except RuntimeError as e:
-            st.error(f"Memory or model loading issue: {e}")
-        except Exception as e:
-            st.error(f"Something went wrong: {e}")
+        if st.button("🐻 Ask the parent bears to tell a story", type="primary"):
+            try:
+                generate_story_and_audio(image, story_mode, voice_style, voice_tone)
+            except RuntimeError as e:
+                st.error(f"Memory or model loading issue: {e}")
+            except Exception as e:
+                st.error(f"Something went wrong: {e}")
+    except Exception as e:
+        st.error(str(e))
 
 show_results()
 
