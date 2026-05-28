@@ -139,11 +139,7 @@ def get_img2text_model():
             device=get_pipeline_device()
         )
     except Exception:
-        return pipeline(
-            "image-text-to-text",
-            model="Salesforce/blip-image-captioning-base",
-            device=get_pipeline_device()
-        )
+        return None
 
 
 @st.cache_resource
@@ -332,19 +328,30 @@ def build_face_expression_summary(faces, expressions):
 
 def image_to_caption(image):
     model = get_img2text_model()
-    output = model(image)
 
-    if not output:
-        return "a happy family moment"
+    if model is None:
+        return "a happy family enjoying a special outdoor moment together"
 
-    first = output[0]
-    caption = (
-        first.get("generated_text")
-        or first.get("text")
-        or ""
-    ).strip()
+    try:
+        output = model(image)
 
-    return caption if caption else "a happy family moment"
+        if not output:
+            return "a happy family enjoying a special outdoor moment together"
+
+        first = output[0]
+        caption = (
+            first.get("generated_text")
+            or first.get("text")
+            or ""
+        ).strip()
+
+        if not caption:
+            return "a happy family enjoying a special outdoor moment together"
+
+        return caption
+
+    except Exception:
+        return "a happy family enjoying a special outdoor moment together"
 
 
 def image_to_caption_with_expression(image):
