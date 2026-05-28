@@ -6,7 +6,7 @@ torchvision
 opencv-python-headless
 librosa
 numpy
-pillow
+Pillow
 soundfile
 sentencepiece
 sacremoses
