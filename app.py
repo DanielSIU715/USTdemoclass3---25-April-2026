@@ -102,15 +102,14 @@ def init_state():
         "last_audio_bytes": None,
         "last_emotion_words": "",
         "reset_counter": 0,
-        "kid_background": "",
-        "kid_photo_about": "",
-        "kid_doing": "",
-        "kid_special": "",
-        "kid_where": "",
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+
+
+def widget_key(name):
+    return f"{name}_{st.session_state.reset_counter}"
 
 
 def clear_generated_outputs():
@@ -126,11 +125,6 @@ def reset_for_another_story():
     st.session_state.uploaded_image_bytes = None
     st.session_state.uploaded_image_name = None
     clear_generated_outputs()
-    st.session_state.kid_background = ""
-    st.session_state.kid_photo_about = ""
-    st.session_state.kid_doing = ""
-    st.session_state.kid_special = ""
-    st.session_state.kid_where = ""
     st.session_state.reset_counter += 1
     st.rerun()
 
@@ -207,6 +201,41 @@ def get_face_detector():
     if detector.empty():
         raise ValueError("Failed to load OpenCV Haar cascade for face detection.")
     return detector
+
+
+# ---------- Helpers ----------
+
+def get_current_form_values():
+    return {
+        "story_mode": st.session_state.get(widget_key("story_mode"), "Fairy-tale"),
+        "voice_style": st.session_state.get(widget_key("voice_style"), "Friendly narrator"),
+        "voice_tone": st.session_state.get(widget_key("voice_tone"), "Adult Bear"),
+        "background": st.session_state.get(widget_key("kid_background"), "").strip(),
+        "about": st.session_state.get(widget_key("kid_photo_about"), "").strip(),
+        "doing": st.session_state.get(widget_key("kid_doing"), "").strip(),
+        "special": st.session_state.get(widget_key("kid_special"), "").strip(),
+        "where": st.session_state.get(widget_key("kid_where"), "").strip(),
+    }
+
+
+def simplify_text(text):
+    replacements = {
+        "shared a lovely time together": "had a nice time together",
+        "special moment": "happy moment",
+        "lovely memory": "happy memory",
+        "extra warm and happy": "very warm and happy",
+        "little bear": "little bear",
+        "family shared": "family had",
+        "treasure": "remember",
+        "peaceful": "calm",
+        "gentle": "soft",
+    }
+
+    out = text
+    for old, new in replacements.items():
+        out = out.replace(old, new)
+
+    return out
 
 
 # ---------- Image ----------
@@ -288,14 +317,14 @@ def normalize_expression_label(label):
     mapping = {
         "happiness": "happy",
         "happy": "happy",
-        "neutral": "neutral",
+        "neutral": "calm",
         "sadness": "sad",
         "sad": "sad",
         "anger": "angry",
         "angry": "angry",
         "surprise": "surprised",
-        "fear": "fearful",
-        "disgust": "disgusted",
+        "fear": "scared",
+        "disgust": "upset",
         "excited": "excited"
     }
     return mapping.get(label, label)
@@ -365,11 +394,7 @@ def image_to_caption(image):
             return DEFAULT_CAPTION
 
         first = output[0]
-        caption = (
-            first.get("generated_text")
-            or first.get("text")
-            or ""
-        ).strip()
+        caption = (first.get("generated_text") or first.get("text") or "").strip()
 
         if not caption:
             return DEFAULT_CAPTION
@@ -378,16 +403,6 @@ def image_to_caption(image):
 
     except Exception:
         return DEFAULT_CAPTION
-
-
-def build_child_facts():
-    return {
-        "background": st.session_state.kid_background.strip(),
-        "about": st.session_state.kid_photo_about.strip(),
-        "doing": st.session_state.kid_doing.strip(),
-        "special": st.session_state.kid_special.strip(),
-        "where": st.session_state.kid_where.strip(),
-    }
 
 
 def build_child_context(child_facts):
@@ -411,15 +426,13 @@ def build_child_context(child_facts):
     return " ".join(parts).strip()
 
 
-def image_to_caption_with_expression(image):
+def image_to_caption_with_expression(image, child_facts):
     base_caption = image_to_caption(image)
     faces = detect_faces(image)
     face_crops = crop_faces(image, faces)
     expressions = detect_facial_expressions(face_crops)
     face_summary = build_face_expression_summary(faces, expressions)
     emotion_words = get_emotion_words(expressions)
-
-    child_facts = build_child_facts()
     child_context = build_child_context(child_facts)
 
     enriched_parts = [f"Observed photo caption: {base_caption}."]
@@ -432,24 +445,21 @@ def image_to_caption_with_expression(image):
 
     enriched_caption = " ".join(part for part in enriched_parts if part).strip()
 
-    return base_caption, face_summary, enriched_caption, emotion_words, child_context, child_facts
+    return base_caption, face_summary, enriched_caption, emotion_words
 
 
-# ---------- Story safety ----------
+# ---------- Story ----------
 
 def contains_unsafe_kids_content(text):
     unsafe_terms = [
         "kill", "killed", "killing", "murder", "blood", "bloody", "knife", "gun",
         "dead", "death", "die", "dying", "attack", "attacked", "violence", "violent",
         "hate", "hated", "naked", "sexy", "sex", "abuse", "abused", "drug", "drugs",
-        "alcohol", "beer", "wine", "terror", "monster killed", "fight to death"
+        "alcohol", "beer", "wine", "terror", "fight to death"
     ]
-
     lowered = text.lower()
     return any(term in lowered for term in unsafe_terms)
 
-
-# ---------- Story grounding ----------
 
 def extract_keywords(text):
     words = re.findall(r"[A-Za-z']+", text.lower())
@@ -463,59 +473,25 @@ def extract_keywords(text):
     return [w for w in words if len(w) >= 4 and w not in stopwords]
 
 
-def story_mentions_child_facts(story, child_facts):
-    story_lower = story.lower()
-
-    important_sources = [
-        child_facts["about"],
-        child_facts["doing"],
-        child_facts["special"],
-        child_facts["where"],
-    ]
-
-    keywords = []
-    for source in important_sources:
-        if source:
-            keywords.extend(extract_keywords(source))
-
-    keywords = list(dict.fromkeys(keywords))[:8]
-
-    if not keywords:
-        return True
-
-    match_count = sum(1 for word in keywords if word in story_lower)
-    return match_count >= 2
-
-
-def story_mentions_photo_content(story, base_caption):
-    caption_keywords = list(dict.fromkeys(extract_keywords(base_caption)))[:6]
-    if not caption_keywords:
-        return True
-
-    story_lower = story.lower()
-    match_count = sum(1 for word in caption_keywords if word in story_lower)
-    return match_count >= 1
-
-
 def build_emotion_closing(emotion_words):
     if emotion_words:
-        return f"At the end, all the bears looked {emotion_words}, and that made the memory feel extra warm and happy."
-    return "At the end, all the bears looked calm and cheerful, and that made the memory feel extra warm and happy."
+        return f"At the end, all the bears looked {emotion_words}, and that made the day feel warm and happy."
+    return "At the end, all the bears looked happy, and that made the day feel warm and happy."
 
 
 def build_grounded_story(base_caption, emotion_words, child_facts):
-    sentences = []
-
     where = child_facts["where"]
     about = child_facts["about"]
     doing = child_facts["doing"]
     special = child_facts["special"]
     background = child_facts["background"]
 
+    sentences = []
+
     if where:
-        sentences.append(f"One happy day at {where}, a little bear and the family shared a lovely time together.")
+        sentences.append(f"One happy day at {where}, a little bear and the family had a nice time together.")
     else:
-        sentences.append("One happy day, a little bear and the family shared a lovely time together.")
+        sentences.append("One happy day, a little bear and the family had a nice time together.")
 
     sentences.append(f"The photo showed {base_caption}.")
 
@@ -524,67 +500,28 @@ def build_grounded_story(base_caption, emotion_words, child_facts):
 
     if doing:
         sentences.append(f"In the picture, the little bear was {doing}.")
-    else:
-        sentences.append("Everyone was enjoying the moment together.")
 
     if special:
         sentences.append(f"This photo was special because {special}.")
 
     if background:
-        sentences.append(f"It was a lovely memory because {background}.")
+        sentences.append(f"It was a happy memory because {background}.")
 
     sentences.append(build_emotion_closing(emotion_words))
 
     story = " ".join(sentences)
+    story = simplify_text(story)
+
     words = story.split()
-    if len(words) > 100:
-        story = " ".join(words[:100]).rstrip(".,;:! ") + "."
+    if len(words) > 95:
+        story = " ".join(words[:95]).rstrip(".,;:! ") + "."
 
     return story
-
-
-def safe_story_fallback(base_caption="", emotion_words="", child_context="", child_facts=None):
-    child_facts = child_facts or build_child_facts()
-    return build_grounded_story(base_caption or DEFAULT_CAPTION, emotion_words, child_facts)
-
-
-def enforce_kid_safe_story(story, base_caption="", emotion_words="", child_context="", child_facts=None):
-    if not story or len(story.split()) < 20:
-        return safe_story_fallback(base_caption, emotion_words, child_context, child_facts)
-
-    if contains_unsafe_kids_content(story):
-        return safe_story_fallback(base_caption, emotion_words, child_context, child_facts)
-
-    return story
-
-
-# ---------- Story cleaning ----------
-
-def trim_to_last_complete_sentence(text):
-    matches = list(re.finditer(r"[.!?]", text))
-    if not matches:
-        return text.strip()
-
-    last_end = matches[-1].end()
-    return text[:last_end].strip()
-
-
-def remove_unwanted_patterns(text):
-    text = re.sub(r"\[\d+\]", "", text)
-    text = re.sub(r"\(\d+\)", "", text)
-    text = re.sub(r"\b\d+%\b", "", text)
-    text = re.sub(r"\b\d+\s*percent\b", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
 
 
 def ensure_caption_in_story(story, base_caption):
-    story_lower = story.lower()
-    caption_lower = base_caption.lower().strip()
-
-    if caption_lower and caption_lower not in story_lower:
+    if base_caption.lower().strip() not in story.lower():
         story = f"The photo showed {base_caption}. " + story
-
     return story
 
 
@@ -592,29 +529,25 @@ def ensure_child_details_in_story(story, child_facts):
     story_lower = story.lower()
 
     if child_facts["about"]:
-        about_keywords = extract_keywords(child_facts["about"])
-        if about_keywords and not any(k in story_lower for k in about_keywords[:3]):
+        if child_facts["about"].lower() not in story_lower:
             story += f" This photo was about {child_facts['about']}."
 
     story_lower = story.lower()
 
     if child_facts["doing"]:
-        doing_keywords = extract_keywords(child_facts["doing"])
-        if doing_keywords and not any(k in story_lower for k in doing_keywords[:3]):
+        if child_facts["doing"].lower() not in story_lower:
             story += f" In the picture, the little bear was {child_facts['doing']}."
 
     story_lower = story.lower()
 
     if child_facts["where"]:
-        where_keywords = extract_keywords(child_facts["where"])
-        if where_keywords and not any(k in story_lower for k in where_keywords[:2]):
-            story += f" This special moment happened at {child_facts['where']}."
+        if child_facts["where"].lower() not in story_lower:
+            story += f" This happy moment happened at {child_facts['where']}."
 
     story_lower = story.lower()
 
     if child_facts["special"]:
-        special_keywords = extract_keywords(child_facts["special"])
-        if special_keywords and not any(k in story_lower for k in special_keywords[:3]):
+        if child_facts["special"].lower() not in story_lower:
             story += f" It was special because {child_facts['special']}."
 
     return story
@@ -622,19 +555,13 @@ def ensure_child_details_in_story(story, child_facts):
 
 def ensure_emotion_closing(story, emotion_words):
     closing_sentence = build_emotion_closing(emotion_words)
-    story = trim_to_last_complete_sentence(story)
-
     sentences = re.split(r"(?<=[.!?])\s+", story.strip())
     sentences = [s.strip() for s in sentences if s.strip()]
 
     filtered = []
     for sentence in sentences:
         lower_sentence = sentence.lower()
-        if "looked happy" in lower_sentence or "looked sad" in lower_sentence or "looked angry" in lower_sentence \
-           or "looked surprised" in lower_sentence or "looked fearful" in lower_sentence \
-           or "looked disgusted" in lower_sentence or "looked neutral" in lower_sentence \
-           or "looked excited" in lower_sentence or "the people in the photo looked" in lower_sentence \
-           or "all the bears looked" in lower_sentence:
+        if "all the bears looked" in lower_sentence or "the people in the photo looked" in lower_sentence:
             continue
         filtered.append(sentence)
 
@@ -643,17 +570,19 @@ def ensure_emotion_closing(story, emotion_words):
 
 
 def clean_story(text, base_caption="", emotion_words="", child_facts=None):
+    if child_facts is None:
+        child_facts = {"background": "", "about": "", "doing": "", "special": "", "where": ""}
+
+    text = text.replace("\\n", " ").replace("\n", " ").strip()
+    text = re.sub(r"\[\d+\]", "", text)
+    text = re.sub(r"\(\d+\)", "", text)
+    text = re.sub(r"\s+", " ", text)
+
     banned_phrases = [
         "story mode", "selected mode", "picture description", "image caption",
         "caption:", "prompt", "instruction", "story version", "rewrite version",
         "new story version", "rules:", "requirements:", "observed photo caption:"
     ]
-
-    child_facts = child_facts or build_child_facts()
-
-    text = text.replace("\\n", " ").replace("\n", " ").strip()
-    text = remove_unwanted_patterns(text)
-    text = re.sub(r"\s+", " ", text)
 
     raw_sentences = re.split(r"(?<=[.!?])\s+", text)
     cleaned = []
@@ -676,7 +605,6 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
         seen.add(lower_sentence)
 
     story = " ".join(cleaned).strip()
-    story = trim_to_last_complete_sentence(story)
 
     if story and story[-1] not in ".!?":
         story += "."
@@ -684,38 +612,35 @@ def clean_story(text, base_caption="", emotion_words="", child_facts=None):
     story = ensure_caption_in_story(story, base_caption)
     story = ensure_child_details_in_story(story, child_facts)
     story = ensure_emotion_closing(story, emotion_words)
-    story = trim_to_last_complete_sentence(story)
+    story = simplify_text(story)
 
     words = story.split()
     if len(words) > 110:
-        shortened = " ".join(words[:110]).rstrip(".,;:! ")
-        story = trim_to_last_complete_sentence(shortened)
+        story = " ".join(words[:110]).rstrip(".,;:! ") + "."
         story = ensure_emotion_closing(story, emotion_words)
 
     return story
 
 
-# ---------- Story ----------
-
 def get_style_instruction(mode):
     style_map = {
-        "Fairy-tale": "Make it feel soft, magical, and gentle.",
-        "Adventure": "Make it playful, fun, and full of small discoveries.",
-        "Bedtime": "Make it calm, cozy, soft, and peaceful.",
+        "Fairy-tale": "Make it soft, sweet, and a little magical.",
+        "Adventure": "Make it fun, playful, and easy to follow.",
+        "Bedtime": "Make it calm, soft, and cozy.",
         "Silly / Funny": "Make it cute, cheerful, and a little funny.",
-        "Superhero": "Make it brave, kind, gentle, and fun."
+        "Superhero": "Make it brave, kind, simple, and fun."
     }
-    return style_map.get(mode, "Make it cheerful, gentle, and child-friendly.")
+    return style_map.get(mode, "Make it sweet, simple, and child-friendly.")
 
 
 def get_voice_instruction(voice_style):
     voice_map = {
-        "Friendly narrator": "Use a warm and friendly storytelling tone.",
-        "Soft bedtime voice": "Use a soft and gentle storytelling tone.",
-        "Excited storyteller": "Use an energetic and lively storytelling tone.",
-        "Cartoonish voice": "Use a playful and cartoon-like storytelling tone."
+        "Friendly narrator": "Use a warm and friendly tone.",
+        "Soft bedtime voice": "Use a soft and gentle tone.",
+        "Excited storyteller": "Use an excited but easy tone.",
+        "Cartoonish voice": "Use a playful and funny tone."
     }
-    return voice_map.get(voice_style, "Use a cheerful storytelling tone.")
+    return voice_map.get(voice_style, "Use a cheerful tone.")
 
 
 def extract_story_only(generated_text, prompt):
@@ -736,43 +661,28 @@ def extract_story_only(generated_text, prompt):
     return generated_text.strip()
 
 
-def build_story_prompt(caption, base_caption, mode, voice_style, emotion_words="", child_context=""):
+def build_story_prompt(caption, base_caption, mode, voice_style, emotion_words="", child_facts=None):
+    child_facts = child_facts or {"background": "", "about": "", "doing": "", "special": "", "where": ""}
     story_seed = random.randint(1000, 999999)
 
-    extra_emotion_line = ""
-    if emotion_words:
-        extra_emotion_line = (
-            f"The story must end by saying that all the bears looked {emotion_words}. "
-            f"The last sentence must describe these facial expressions."
-        )
-
-    extra_child_line = ""
-    if child_context:
-        extra_child_line = (
-            "Use the child's answers as true facts. "
-            "Do not ignore them. "
-            "Do not invent unrelated events, holidays, weather, places, or actions."
-        )
-
     return f"""
-Write a very simple and sweet children's story for ages 5 to 8.
+Write a very simple story for a young child aged 4 to 7.
 
-Use only the observed photo caption and the child's answers.
-Do not invent unrelated events.
-Use very easy words.
+Use only the photo caption and the child's answers.
+Use easy words.
 Use short sentences.
-Make the story warm, happy, gentle, and clear.
-The story must have a clear beginning, middle, and ending.
-Keep the story between 60 and 90 words.
-The story must clearly mention this observed photo caption: {base_caption}.
-The final sentence must describe the facial expressions in the photo.
-Do not include references, citations, brackets, percentages, statistics, or random facts.
-{extra_emotion_line}
-{extra_child_line}
+Make it sound like a story a small child would enjoy.
+Do not use hard words, fancy words, or long descriptions.
+Do not invent unrelated events.
+The story must clearly say: The photo showed {base_caption}.
+The story must use the child's ideas when they are given.
+The last sentence must be about the faces in the photo.
+If the faces look happy, end by saying all the bears looked happy.
+Keep the story between 50 and 85 words.
 {get_style_instruction(mode)}
 {get_voice_instruction(voice_style)}
 
-Picture description and facts: {caption}
+Photo facts: {caption}
 
 Story version: {story_seed}
 
@@ -780,7 +690,7 @@ Story:
 """.strip()
 
 
-def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=None, max_new_tokens=140):
+def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=None, max_new_tokens=120):
     tokenizer, model = get_story_components()
 
     try:
@@ -796,8 +706,8 @@ def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=N
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=True,
-            temperature=0.65,
-            top_p=0.85,
+            temperature=0.55,
+            top_p=0.82,
             repetition_penalty=1.25,
             no_repeat_ngram_size=3,
             pad_token_id=tokenizer.eos_token_id,
@@ -810,9 +720,9 @@ def generate_story_once(prompt, base_caption="", emotion_words="", child_facts=N
     return story
 
 
-def caption_to_story(base_caption, caption, mode, voice_style, emotion_words="", child_context="", child_facts=None):
-    child_facts = child_facts or build_child_facts()
-    prompt = build_story_prompt(caption, base_caption, mode, voice_style, emotion_words, child_context)
+def caption_to_story(base_caption, caption, mode, voice_style, emotion_words="", child_facts=None):
+    child_facts = child_facts or {"background": "", "about": "", "doing": "", "special": "", "where": ""}
+    prompt = build_story_prompt(caption, base_caption, mode, voice_style, emotion_words, child_facts)
 
     for _ in range(3):
         story = generate_story_once(
@@ -821,34 +731,12 @@ def caption_to_story(base_caption, caption, mode, voice_style, emotion_words="",
             emotion_words=emotion_words,
             child_facts=child_facts
         )
-        story = enforce_kid_safe_story(
-            story,
-            base_caption=base_caption,
-            emotion_words=emotion_words,
-            child_context=child_context,
-            child_facts=child_facts
-        )
         story = clean_story(story, base_caption=base_caption, emotion_words=emotion_words, child_facts=child_facts)
 
-        wc = len(story.split())
-        facts_ok = story_mentions_child_facts(story, child_facts)
-        photo_ok = story_mentions_photo_content(story, base_caption)
-        closing_ok = build_emotion_closing(emotion_words).lower() in story.lower()
-
-        if (
-            50 <= wc <= 115
-            and not contains_unsafe_kids_content(story)
-            and "[" not in story
-            and "%" not in story
-            and facts_ok
-            and photo_ok
-            and closing_ok
-        ):
+        if not contains_unsafe_kids_content(story):
             return story
 
-    grounded_story = build_grounded_story(base_caption, emotion_words, child_facts)
-    grounded_story = clean_story(grounded_story, base_caption=base_caption, emotion_words=emotion_words, child_facts=child_facts)
-    return grounded_story
+    return build_grounded_story(base_caption, emotion_words, child_facts)
 
 
 # ---------- Audio ----------
@@ -947,35 +835,35 @@ def show_kid_questions():
 
     st.text_area(
         "Can you share more background to other little bears about your photo?",
-        key="kid_background",
+        key=widget_key("kid_background"),
         height=90,
         placeholder="For example: This was during our family picnic and everyone was very excited."
     )
 
     st.text_area(
         "What is this photo about?",
-        key="kid_photo_about",
+        key=widget_key("kid_photo_about"),
         height=80,
         placeholder="For example: It is about my family having fun together."
     )
 
     st.text_area(
         "What were you doing in the photo?",
-        key="kid_doing",
+        key=widget_key("kid_doing"),
         height=80,
         placeholder="For example: I was fishing with my family."
     )
 
     st.text_area(
         "Why is this photo special for you?",
-        key="kid_special",
+        key=widget_key("kid_special"),
         height=80,
         placeholder="For example: It was our first family picnic."
     )
 
     st.text_area(
         "Where was this photo taken?",
-        key="kid_where",
+        key=widget_key("kid_where"),
         height=80,
         placeholder="For example: At Disneyland or at the park."
     )
@@ -1008,9 +896,17 @@ def show_results():
             reset_for_another_story()
 
 
-def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
+def generate_story_and_audio(image, form_values):
     with st.spinner("📸 A tiny owl is peeking at your picture..."):
-        base_caption, face_summary, enriched_caption, emotion_words, child_context, child_facts = image_to_caption_with_expression(image)
+        child_facts = {
+            "background": form_values["background"],
+            "about": form_values["about"],
+            "doing": form_values["doing"],
+            "special": form_values["special"],
+            "where": form_values["where"],
+        }
+
+        base_caption, face_summary, enriched_caption, emotion_words = image_to_caption_with_expression(image, child_facts)
         st.session_state.last_base_caption = base_caption
         st.session_state.last_face_summary = face_summary
         st.session_state.last_caption = enriched_caption
@@ -1020,15 +916,14 @@ def generate_story_and_audio(image, story_mode, voice_style, voice_tone):
         story = caption_to_story(
             base_caption=base_caption,
             caption=enriched_caption,
-            mode=story_mode,
-            voice_style=voice_style,
+            mode=form_values["story_mode"],
+            voice_style=form_values["voice_style"],
             emotion_words=emotion_words,
-            child_context=child_context,
             child_facts=child_facts
         )
 
     with st.spinner("🐻 Some little bears are tasting your story!"):
-        voice_audio, sr = text_to_audio(story, voice_style, voice_tone)
+        voice_audio, sr = text_to_audio(story, form_values["voice_style"], form_values["voice_tone"])
         audio_bytes = audio_to_wav_bytes(voice_audio, sr)
 
     st.session_state.last_story = story
@@ -1048,31 +943,27 @@ init_state()
 show_entry_gate()
 
 st.title(APP_TITLE)
-st.write(
-    "Upload one image and let the parent bears turn it into a child-friendly story and voice."
-)
+st.write("Upload one image and let the parent bears turn it into a child-friendly story and voice.")
 
-suffix = str(st.session_state.reset_counter)
-
-story_mode = st.selectbox(
+st.selectbox(
     "Choose a story mode",
     ["Fairy-tale", "Adventure", "Bedtime", "Silly / Funny", "Superhero"],
     index=0,
-    key=f"story_mode_{suffix}"
+    key=widget_key("story_mode")
 )
 
-voice_style = st.selectbox(
+st.selectbox(
     "Choose a voice style",
     ["Friendly narrator", "Soft bedtime voice", "Excited storyteller", "Cartoonish voice"],
     index=0,
-    key=f"voice_style_{suffix}"
+    key=widget_key("voice_style")
 )
 
-voice_tone = st.selectbox(
+st.selectbox(
     "Choose a bear voice",
     ["Adult Bear", "Old Bear", "Teenage Bear"],
     index=0,
-    key=f"voice_tone_{suffix}"
+    key=widget_key("voice_tone")
 )
 
 show_kid_questions()
@@ -1081,7 +972,7 @@ uploaded_image = st.file_uploader(
     "Upload one image",
     type=["jpg", "jpeg", "png", "webp"],
     accept_multiple_files=False,
-    key=f"uploader_{suffix}"
+    key=widget_key("uploader")
 )
 
 try:
@@ -1097,7 +988,8 @@ if st.session_state.uploaded_image_bytes is not None:
 
         if st.button("🐻 Ask the parent bears to tell a story", type="primary"):
             try:
-                generate_story_and_audio(image, story_mode, voice_style, voice_tone)
+                form_values = get_current_form_values()
+                generate_story_and_audio(image, form_values)
             except RuntimeError as e:
                 st.error(f"Memory or model loading issue: {e}")
             except Exception as e:
